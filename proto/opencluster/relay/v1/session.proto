@@ -1,0 +1,273 @@
+// OpenCluster Relay protocol v1 — the bidirectional session stream.
+//
+// One outbound TLS connection from the Relay carries exactly one Connect stream. The
+// relay credential travels in call METADATA (verified server-side against a
+// constant-time digest — never a KDF on the connect path). The stream is a DELIVERY
+// CHANNEL ONLY: durable job state lives in the control plane's database; every job is
+// leased and fenced by (job_id, server session id, lease_epoch) under the
+// control-plane clock, and a stream disconnect can neither lose nor silently
+// complete a job.
+//
+// Envelope evolution is ADDITIVE (new oneof variants, new fields); capability
+// argument/result messages are strict and frozen (see kubernetes_runtime.proto).
+// Neither side uses google.protobuf.Any/Struct/Value, maps, raw JSON payloads, or
+// command/script/path fields — enforced by the CI schema-shape gate. Receivers
+// refuse messages carrying unknown fields in capability payloads (recursive
+// protoreflect walk; DiscardUnknown is forbidden).
+
+syntax = "proto3";
+
+package opencluster.relay.v1;
+
+import "google/protobuf/duration.proto";
+import "opencluster/relay/v1/kubernetes_runtime.proto";
+import "opencluster/relay/v1/registration.proto";
+
+option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
+option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+
+// ---------------------------------------------------------------------------------
+// Capability payload wrappers: a CLOSED oneof per direction. Adding a capability is
+// an additive envelope change; each variant is a frozen versioned message.
+// ---------------------------------------------------------------------------------
+
+message CapabilityArguments {
+  oneof arguments {
+    KubernetesWorkloadRuntimeArgsV1 kubernetes_runtime_v1 = 10;
+  }
+}
+
+message CapabilityResult {
+  oneof result {
+    KubernetesWorkloadRuntimeResultV1 kubernetes_runtime_v1 = 10;
+  }
+}
+
+// ---------------------------------------------------------------------------------
+// Relay → control plane
+// ---------------------------------------------------------------------------------
+
+// One job still executing from a previous session generation. ATTESTED input with no
+// authority of its own: it can only cause lease renewal for jobs already assigned to
+// this registration under a valid epoch — fencing decides everything else.
+message InFlightJob {
+  string job_id = 1;
+  uint64 lease_epoch = 2;
+  // Monotonic elapsed execution time, measured Relay-side. Never enters a fence.
+  int64 elapsed_ms = 3;
+}
+
+message Hello {
+  uint32 protocol_version = 1;
+  string relay_version = 2;
+  repeated CapabilityDescriptor capabilities = 3;
+  string cluster_fingerprint = 4;
+  // Hash of the customer-authored local policy; drift visibility for operators.
+  // The control plane makes no security decision from it.
+  string local_policy_hash = 5;
+  // Concurrent-job capacity from the customer's local policy; the server never
+  // dispatches beyond it. Coupled Relay-side to the unacked-result buffer capacity.
+  uint32 max_concurrent_jobs = 6;
+  // Self-report of the dangerous insecureDisableEndpointPinning flag; surfaced on
+  // the Integrations health page.
+  bool endpoint_pinning_disabled = 7;
+  repeated InFlightJob in_flight = 8;
+}
+
+message Heartbeat {
+  uint64 sequence = 1;
+  // Attestations refreshed between hellos; last-seen is stamped server-side.
+  string local_policy_hash = 2;
+  uint32 in_flight_count = 3;
+}
+
+// Assignment received and queued for execution.
+message JobAck {
+  string job_id = 1;
+  uint64 lease_epoch = 2;
+}
+
+message JobStarted {
+  string job_id = 1;
+  uint64 lease_epoch = 2;
+}
+
+// Typed execution failure. No free-text from source faults: detail carries at most
+// an exception TYPE NAME, mirroring the central totality contract.
+message JobFailure {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_TIMEOUT = 1;
+    KIND_CANCELLED = 2;
+    KIND_UNSUPPORTED_CAPABILITY_VERSION = 3;
+    KIND_ARGUMENTS_REJECTED = 4;
+    KIND_RESULT_TOO_LARGE = 5;
+    KIND_IDENTITY_MISMATCH = 6;
+    KIND_LOCAL_POLICY_REFUSED = 7;
+    KIND_INTERNAL = 8;
+  }
+  Kind kind = 1;
+  string detail = 2;
+}
+
+message JobResult {
+  string job_id = 1;
+  // Echoes the assignment's epoch — the fence's wire round-trip. Results from a
+  // previous epoch lose the fence server-side and are audited.
+  uint64 lease_epoch = 2;
+  oneof outcome {
+    CapabilityResult result = 3;
+    JobFailure failure = 4;
+  }
+  // Monotonic execution duration, Relay-measured; provenance only.
+  int64 execution_duration_ms = 5;
+}
+
+message CancelAck {
+  enum Disposition {
+    DISPOSITION_UNSPECIFIED = 0;
+    DISPOSITION_ABORTED = 1;
+    // Result was already produced before the cancel arrived; the result wins and is
+    // (re)delivered — data beats a cancellation.
+    DISPOSITION_ALREADY_COMPLETED = 2;
+  }
+  string job_id = 1;
+  uint64 lease_epoch = 2;
+  Disposition disposition = 3;
+}
+
+message DrainState {
+  bool draining = 1;
+  uint32 in_flight_count = 2;
+  uint32 unacked_result_count = 3;
+}
+
+// Successor credential persisted durably; the server revokes the predecessor only
+// after receiving this (write-order: persist first, confirm after).
+message RotationConfirm {
+  string rotation_id = 1;
+}
+
+message ProtocolError {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_MALFORMED_MESSAGE = 1;
+    CODE_UNKNOWN_FIELDS_REFUSED = 2;
+    CODE_UNSUPPORTED_PROTOCOL_VERSION = 3;
+    CODE_INTAKE_SHED = 4;
+  }
+  Code code = 1;
+  string detail = 2;
+}
+
+message RelayToControl {
+  oneof message {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    JobAck job_ack = 3;
+    JobStarted job_started = 4;
+    JobResult job_result = 5;
+    CancelAck cancel_ack = 6;
+    DrainState drain_state = 7;
+    RotationConfirm rotation_confirm = 8;
+    ProtocolError protocol_error = 9;
+  }
+}
+
+// ---------------------------------------------------------------------------------
+// Control plane → relay
+// ---------------------------------------------------------------------------------
+
+message SessionAccepted {
+  // Server-minted session id — the lease owner for every job assigned on this
+  // stream.
+  string session_id = 1;
+  uint32 protocol_version = 2;
+  google.protobuf.Duration heartbeat_interval = 3;
+  // Transport bounds; capability-level result caps sit strictly below max_send.
+  uint32 max_receive_bytes = 4;
+  uint32 max_send_bytes = 5;
+}
+
+message JobAssignment {
+  string job_id = 1;
+  // The Relay verifies BOTH against its bootstrap-bound identity; a mismatch is
+  // refused (KIND_IDENTITY_MISMATCH) and audited locally as a possible
+  // control-plane-compromise indicator.
+  string org_id = 2;
+  string registration_id = 3;
+  uint64 lease_epoch = 4;
+  string capability_id = 5;
+  uint32 capability_version = 6;
+  // Duration budget measured on the Relay's monotonic clock from receipt — never an
+  // absolute timestamp compared to a Relay wall clock.
+  google.protobuf.Duration deadline_budget = 7;
+  string idempotency_key = 8;
+  // Random token, provably free of incident/model/tenant semantics; audit-only.
+  string correlation_id = 9;
+  CapabilityArguments arguments = 10;
+}
+
+message Cancellation {
+  string job_id = 1;
+  uint64 lease_epoch = 2;
+}
+
+message ResultAck {
+  enum Disposition {
+    DISPOSITION_UNSPECIFIED = 0;
+    DISPOSITION_RECORDED = 1;
+    // Terminal row already exists (resend, or re-dispatch already recorded) —
+    // definitive; the Relay drops the buffered result.
+    DISPOSITION_ALREADY_RECORDED = 2;
+    // Stale epoch while a successor epoch is still executing: stop resending this
+    // copy; the job's fate belongs to the successor.
+    DISPOSITION_STALE_STOP_RESENDING = 3;
+  }
+  string job_id = 1;
+  uint64 lease_epoch = 2;
+  Disposition disposition = 3;
+}
+
+// Issued while the predecessor credential stays valid for a bounded overlap window.
+// Rate-bounded at Relay intake like every push (rotation writes touch the K8s API).
+message CredentialRotation {
+  string rotation_id = 1;
+  string new_credential = 2;
+}
+
+message DrainInstruction {
+  google.protobuf.Duration deadline = 1;
+}
+
+// Advisory minimum capability versions; absence of a capability at a required
+// version surfaces centrally as a coverage gap, never a silent skip.
+message CapabilityRequirements {
+  repeated CapabilityDescriptor minimum_versions = 1;
+}
+
+message GracefulReconnect {
+  // Explicit server-directed reconnect (deploys, rebalancing). An unexplained
+  // GOAWAY re-enters normal backoff; it never resets it.
+  google.protobuf.Duration retry_after = 1;
+}
+
+message ControlToRelay {
+  oneof message {
+    SessionAccepted session_accepted = 1;
+    JobAssignment job_assignment = 2;
+    Cancellation cancellation = 3;
+    ResultAck result_ack = 4;
+    CredentialRotation credential_rotation = 5;
+    DrainInstruction drain_instruction = 6;
+    CapabilityRequirements capability_requirements = 7;
+    GracefulReconnect graceful_reconnect = 8;
+  }
+}
+
+// The session stream. Exactly one concurrent sender per direction per the gRPC
+// stream contract; the Relay serializes all writes through a single sender
+// goroutine draining a bounded channel.
+service RelaySessionService {
+  rpc Connect(stream RelayToControl) returns (stream ControlToRelay);
+}

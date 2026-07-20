@@ -1,0 +1,21 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # Deliberate exception: the session stream's envelope messages keep their
+  # direction-describing names (RelayToControl / ControlToRelay) from the reviewed
+  # protocol design instead of the ConnectRequest/ConnectResponse convention — the
+  # direction is the load-bearing information on a long-lived bidirectional stream.
+  ignore_only:
+    RPC_REQUEST_STANDARD_NAME:
+      - proto/opencluster/relay/v1/session.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - proto/opencluster/relay/v1/session.proto
+  # Capability argument/result messages are strict and frozen once released; the
+  # transport envelope evolves additively. Both are enforced by `buf breaking`
+  # against the committed baseline plus the schema-shape gate in CI.
+breaking:
+  use:
+    - FILE

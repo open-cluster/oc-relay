@@ -1,0 +1,4 @@
+# LF everywhere: the gofmt/buf-format/gen-drift CI gates depend on stable line
+# endings across platforms.
+* text=auto eol=lf
+*.binpb binary

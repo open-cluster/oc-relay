@@ -1,0 +1,66 @@
+// OpenCluster Relay protocol v1 — registration.
+//
+// The bootstrap token travels in call METADATA over TLS, never in a message field.
+// Register is unauthenticated-reachable and is flood-protected server-side (strict
+// global and per-IP caps, constant-work rejection of invalid tokens). The returned
+// durable credential is displayed to the wire exactly once; the Relay persists it to
+// its pre-created Secret (in-cluster) or credential file (beside-control-plane).
+//
+// Capability argument/result messages are STRICT AND FROZEN once released: any change
+// mints a new versioned message type. The transport envelope (session.proto) evolves
+// additively. Enforced by `buf breaking` against the committed baseline.
+
+syntax = "proto3";
+
+package opencluster.relay.v1;
+
+option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
+option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+
+// One advertised capability at one compiled-in schema version.
+message CapabilityDescriptor {
+  // Closed capability identifier, e.g. "kubernetes.runtime".
+  string capability_id = 1;
+  // Compiled-in schema version, e.g. 1. The Relay refuses jobs at any other version.
+  uint32 capability_version = 2;
+}
+
+message RegisterRequest {
+  // Highest protocol version this Relay speaks.
+  uint32 protocol_version = 1;
+  // Relay release version (semver), attestation for support-window checks.
+  string relay_version = 2;
+  // Stable cluster fingerprint: the kube-system namespace UID. Pinned server-side;
+  // a change refuses or flags rather than mis-attributes. Detects re-pointed and
+  // rebuilt clusters, not a UID-preserving etcd restore.
+  string cluster_fingerprint = 3;
+  // Compiled capability roster.
+  repeated CapabilityDescriptor capabilities = 4;
+}
+
+message RegisterResponse {
+  // Server-assigned durable relay identity.
+  string relay_id = 1;
+  // Organization this registration is bound to. The Relay stores it and verifies
+  // every job assignment against it (a mismatch is refused and audited as a
+  // control-plane-compromise indicator).
+  string org_id = 2;
+  // Registration identity, verified on every job assignment alongside org_id.
+  string registration_id = 3;
+  // Durable credential (random 256-bit, base64). Sent exactly once over TLS; stored
+  // server-side only as a constant-time-comparable digest.
+  string credential = 4;
+  // Initial SPKI pin set for the control-plane endpoint (base64 SHA-256 of the
+  // SubjectPublicKeyInfo), at least one active and one backup pin. Refreshed later
+  // over the pinned authenticated stream (trust continuity).
+  repeated string spki_pins = 5;
+  // Negotiated protocol version for subsequent sessions.
+  uint32 protocol_version = 6;
+}
+
+// Registration exchange. The bootstrap token rides in call metadata; a consumed or
+// invalid token fails the RPC with a typed status and is audited (second use of a
+// consumed token additionally raises a possible-interception alert).
+service RelayRegistrationService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+}

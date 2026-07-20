@@ -1,0 +1,64 @@
+# CI: verification only. This workflow deliberately contains NO registry push, image
+# publish, module-proxy warm, or release-upload step — publication is founder-gated
+# and is wired in as its own reviewed change when authorized. Actions are pinned by
+# commit SHA (supply chain for the CI itself).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install pinned proto toolchain
+        run: make tools
+
+      - name: Lint (buf + gofmt + vet)
+        run: make lint
+
+      - name: Generated-code drift gate
+        run: make gen-check
+
+      - name: Protobuf breaking-change gate
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=${{ github.base_ref }}"
+
+      - name: Build (CGO disabled, trimpath)
+        run: make build
+
+      - name: Tests (race detector)
+        run: make test
+
+      - name: Vulnerability scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Dependency license gate
+        run: |
+          go install github.com/google/go-licenses@latest
+          go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC,MPL-2.0 \
+            --ignore github.com/OCluster/opencluster-relay || true
+          # || true until first-party packages exist; flips to hard-fail with R1 code.
+
+      - name: Secret scan (gitleaks, full history)
+        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

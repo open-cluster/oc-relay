@@ -1,0 +1,148 @@
+// OpenCluster Relay protocol v1 — kubernetes.runtime capability, schema version 1.
+//
+// Mirrors the verified S1B-3 workload-runtime read semantics. This message set is
+// FROZEN: any semantic change mints kubernetes_runtime v2 messages. String fields
+// carry the same caps as the central projections (identifiers 253, reasons 128,
+// images 256, quantities 32 chars) — enforced in code on both ends; the transport
+// additionally bounds total message size. No message/env/command fields exist,
+// structurally. All timestamps are source-observed values and are PROVENANCE ONLY —
+// they never enter any server-side fence, expiry, or dedup comparison.
+
+syntax = "proto3";
+
+package opencluster.relay.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
+option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+
+// Closed workload vocabulary. The control plane validates before dispatch and the
+// Relay re-validates on receipt; there is no fall-through default branch.
+enum WorkloadKind {
+  WORKLOAD_KIND_UNSPECIFIED = 0;
+  WORKLOAD_KIND_DEPLOYMENT = 1;
+  WORKLOAD_KIND_STATEFULSET = 2;
+  WORKLOAD_KIND_DAEMONSET = 3;
+}
+
+message KubernetesWorkloadRuntimeArgsV1 {
+  // DNS-1123 label, max 63 chars.
+  string namespace = 1;
+  WorkloadKind workload_kind = 2;
+  // DNS-1123 subdomain, max 253 chars.
+  string workload_name = 3;
+  // Single-page pod list bound. The Relay's customer-authored local caps may lower
+  // the effective value; the completeness flag reports the truth either way.
+  uint32 max_pods = 4;
+}
+
+// Read outcome taxonomy — identical to the verified central contract. A not-found is
+// NEVER absence evidence; an unrepresentable selector REFUSES enumeration rather
+// than listing a namespace.
+enum KubernetesReadOutcome {
+  KUBERNETES_READ_OUTCOME_UNSPECIFIED = 0;
+  KUBERNETES_READ_OUTCOME_SUCCESS = 1;
+  KUBERNETES_READ_OUTCOME_UNREACHABLE = 2;
+  KUBERNETES_READ_OUTCOME_UNAUTHORIZED = 3;
+  KUBERNETES_READ_OUTCOME_WORKLOAD_NOT_FOUND = 4;
+  KUBERNETES_READ_OUTCOME_NAMESPACE_NOT_FOUND = 5;
+  KUBERNETES_READ_OUTCOME_SELECTOR_UNREPRESENTABLE = 6;
+}
+
+message KubernetesContainerTermination {
+  // Termination reason, default "Unknown"; the literal "OOMKilled" is the OOM
+  // detection key on BOTH this and the current-state termination.
+  string reason = 1;
+  int32 exit_code = 2;
+  google.protobuf.Timestamp finished_at = 3;
+}
+
+message KubernetesContainerState {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_RUNNING = 1;
+    KIND_WAITING = 2;
+    KIND_TERMINATED = 3;
+  }
+  // Exactly one of running/terminated/waiting, precedence Running > Terminated >
+  // Waiting, mirrored from container status.
+  Kind kind = 1;
+  string waiting_reason = 2;
+  google.protobuf.Timestamp running_since = 3;
+  KubernetesContainerTermination termination = 4;
+}
+
+message KubernetesContainerRuntime {
+  string name = 1;
+  string image = 2;
+  bool ready = 3;
+  int32 restart_count = 4;
+  KubernetesContainerState state = 5;
+  // Last observed termination (status.lastState.terminated); absent when none.
+  KubernetesContainerTermination last_termination = 6;
+}
+
+message KubernetesPodRuntime {
+  string name = 1;
+  // Pod phase, default "Unknown".
+  string phase = 2;
+  string node_name = 3;
+  google.protobuf.Timestamp started_at = 4;
+  // True when a Ready condition reports status "True".
+  bool ready = 5;
+  // Reason of a PodScheduled condition with status "False"; empty when scheduled.
+  string unscheduled_reason = 6;
+  repeated KubernetesContainerRuntime containers = 7;
+}
+
+message KubernetesContainerResources {
+  string container = 1;
+  string cpu_request = 2;
+  string cpu_limit = 3;
+  string memory_request = 4;
+  string memory_limit = 5;
+}
+
+message KubernetesWorkloadSummary {
+  // Normalized lowercase kind literal.
+  string kind = 1;
+  string name = 2;
+  string namespace = 3;
+  string uid = 4;
+  // Per-kind counter mapping: Deployment/StatefulSet read spec.replicas and the
+  // status ready/updated/available counters; DaemonSet reads DesiredNumberScheduled,
+  // NumberReady, UpdatedNumberScheduled, NumberAvailable. Nullable source counters
+  // coalesce to zero.
+  int32 desired_replicas = 5;
+  int32 ready_replicas = 6;
+  int32 updated_replicas = 7;
+  int32 available_replicas = 8;
+  int64 generation = 9;
+  int64 observed_generation = 10;
+  google.protobuf.Timestamp created_at = 11;
+  // Declared images/resources from the pod template spec, not running pods.
+  repeated string container_images = 12;
+  repeated KubernetesContainerResources container_resources = 13;
+  // Complete selector rendering (matchLabels AND matchExpressions, source order).
+  // Empty exactly when the outcome is SELECTOR_UNREPRESENTABLE.
+  string selector_summary = 14;
+}
+
+message KubernetesWorkloadRuntimeResultV1 {
+  KubernetesReadOutcome outcome = 1;
+  // Present only on SUCCESS.
+  KubernetesWorkloadSummary workload = 2;
+  repeated KubernetesPodRuntime pods = 3;
+  // Completeness basis the central certificate consumes — must arrive intact:
+  // returned page size, single-page continuation-free flag, and source read time.
+  int32 returned_pod_count = 4;
+  // True iff the single bounded pod LIST returned no continuation token
+  // ("list-without-continuation" basis). Certified absence claims are minted
+  // centrally and ONLY from a complete read.
+  bool complete = 5;
+  // Source-observed read time; provenance only.
+  google.protobuf.Timestamp read_at = 6;
+  // Effective pod bound applied (dispatch bound possibly lowered by local caps).
+  uint32 applied_max_pods = 7;
+}

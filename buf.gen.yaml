@@ -1,0 +1,13 @@
+# Deterministic generation: plugins run from the local toolchain at PINNED versions
+# (protoc-gen-go v1.36.5, protoc-gen-go-grpc v1.5.1 — install via `make tools`).
+# Generated Go is COMMITTED under gen/go; CI fails on drift (`make gen` + git diff).
+# C# generation happens in the consuming control-plane repository at build time from
+# a synchronized copy of proto/ (pinned SHA-256 manifest + committed descriptor set).
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: gen/go
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: gen/go
+    opt: paths=source_relative
