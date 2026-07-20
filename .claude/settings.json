@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go list *)",
+      "Bash(go mod *)",
+      "Bash(gofmt *)",
+      "Bash(make *)",
+      "Bash(buf *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": [
+      "Write(.env)",
+      "Read(.env)",
+      "Write(gen/**)",
+      "Edit(gen/**)"
+    ]
+  }
+}
