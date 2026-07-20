@@ -47,12 +47,12 @@ jobs:
 
       - name: Vulnerability scan (govulncheck)
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
-      - name: Dependency license gate
+      - name: Dependency license check (advisory pre-R1)
         run: |
-          go install github.com/google/go-licenses@latest
+          go install github.com/google/go-licenses@v1.6.0
           go-licenses check ./... \
             --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC,MPL-2.0 \
             --ignore github.com/OCluster/opencluster-relay || true

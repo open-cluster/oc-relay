@@ -13,8 +13,10 @@ PGP key at this stage.
 ## Design posture (summary)
 
 - Read-only execution: compiled capability registry; no shell, no subprocesses, no
-  dynamic code; enforced by build-failing CI gates (import allowlist, symbol bans,
-  cgo disabled, kubeconfig credential-plugin refusal).
+  dynamic code. Enforcement is mechanical and build-failing: the cgo-disabled build
+  is wired today, and the remaining gates (import allowlist, symbol bans,
+  kubeconfig credential-plugin refusal) land with the capability surfaces they
+  guard, before any release.
 - Outbound-only connectivity: one TLS stream to a pinned (SPKI) control-plane
   endpoint; no inbound listeners.
 - Least privilege: read-only Kubernetes RBAC with a single narrow exception (the

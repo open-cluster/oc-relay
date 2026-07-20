@@ -13,8 +13,10 @@ capabilities compiled into the binary — returning bounded structured results.
 
 The Relay contains no model code, no AI reasoning, no incident state, no shell, no
 scripts, no dynamic plugins, and no generic remote-execution mechanism. Every
-capability is a compiled Go handler with a frozen Protobuf argument/result schema;
-this is enforced by build-failing CI gates, not convention.
+capability is a compiled Go handler with a frozen Protobuf argument/result schema,
+enforced by build-failing gates rather than convention — the cgo-disabled build is
+wired today and the remaining banned-API gates land with the capability surfaces
+they guard, before any release.
 
 ## What data leaves the cluster
 
