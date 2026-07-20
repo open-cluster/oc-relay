@@ -27,8 +27,10 @@ gen-check: gen
 build:
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false ./...
 
+# The race detector requires cgo, so tests run with CGO_ENABLED=1. This is distinct from
+# the shipped artifact: `build` stays CGO_ENABLED=0 for a static, reproducible binary.
 test:
-	CGO_ENABLED=0 go test -race ./...
+	CGO_ENABLED=1 go test -race ./...
 
 # Breaking-change gate against the committed baseline (main).
 breaking:
