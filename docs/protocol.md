@@ -67,11 +67,11 @@ credentials exist.
 | `SessionAccepted` | After credential verification and `Hello` validation | None (the minted session id becomes the lease owner for later claims) | Once per stream | Session established — no job promises |
 | `JobAssignment` | Only after the durable claim transaction commits (queued → leased) | The claim preceded it; the message is pure delivery | Redelivered by sweep / on-connect catch-up; Relay dedups by (job id, epoch) | Delivery attempted — reception is `JobAck`'s claim |
 | `Cancellation` | When the control plane wants the job stopped | None; the job stays leased until recorded or expired | May resend; duplicates ignored | A request only — a produced result still wins |
-| `ResultAck` | ONLY after the recording transaction commits (`RECORDED` / `ALREADY_RECORDED`) or a post-commit stale classification (`STALE_STOP_RESENDING`) | The commit preceded it | Re-answering a resent result is idempotent | The job's durable fate is settled |
+| `ResultAck` | ONLY after the recording transaction commits (`RECORDED` / `ALREADY_RECORDED`) or a post-commit stale classification (`STALE_STOP_RESENDING`) | The commit preceded it | Re-answering a resent result is idempotent | This result copy's disposition is definitively decided; `STALE` defers the job's fate to the successor epoch still executing — never treat it as completion |
 | `CredentialRotation` | Rotation window open | Predecessor stays valid until `RotationConfirm` | Resent until confirmed | Delivery of the successor — not its adoption |
 | `DrainInstruction` | Before shutdown or rebalancing | None; unfinished work recovers via lease expiry | May resend | Instruction delivered |
 | `CapabilityRequirements` | On connect and on change | None | Superseded by the next | Advisory minimums; a missing capability surfaces centrally as a coverage gap, never a silent skip |
-| `GracefulReconnect` | Deploys, rebalancing | None | n/a | Server-directed reconnect with `retry_after`; an unexplained GOAWAY re-enters normal backoff and never resets it |
+| `GracefulReconnect` | Deploys, rebalancing | None | A duplicate simply re-triggers the reconnect — idempotent in effect | Server-directed reconnect with `retry_after`; an unexplained GOAWAY re-enters normal backoff and never resets it |
 
 ## Load-bearing rules
 
