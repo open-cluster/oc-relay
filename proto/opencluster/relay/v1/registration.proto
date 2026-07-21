@@ -14,8 +14,8 @@ syntax = "proto3";
 
 package opencluster.relay.v1;
 
-option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
 option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
 
 // One advertised capability at one compiled-in schema version.
 message CapabilityDescriptor {

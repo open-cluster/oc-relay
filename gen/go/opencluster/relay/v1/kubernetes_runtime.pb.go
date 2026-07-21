@@ -1,7 +1,6 @@
 // OpenCluster Relay protocol v1 — kubernetes.runtime capability, schema version 1.
 //
-// Mirrors the verified S1B-3 workload-runtime read semantics. This message set is
-// FROZEN: any semantic change mints kubernetes_runtime v2 messages. String fields
+// This message set is FROZEN: any semantic change mints kubernetes_runtime v2 messages. String fields
 // carry the same caps as the central projections (identifiers 253, reasons 128,
 // images 256, quantities 32 chars) — enforced in code on both ends; the transport
 // additionally bounds total message size. No message/env/command fields exist,
@@ -17,13 +16,12 @@
 package relayv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (

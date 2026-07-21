@@ -23,20 +23,28 @@ const (
 	maxQuantityChars = 32
 )
 
-func capIdentifier(value string) string { return capChars(value, maxIdentifierChars) }
+func capIdentifier(value string) string {
+	return capChars(value, maxIdentifierChars)
+}
 
-func capReason(value string) string { return capChars(value, maxReasonChars) }
+func capReason(value string) string {
+	return capChars(value, maxReasonChars)
+}
 
-func capImage(value string) string { return capChars(value, maxImageChars) }
+func capImage(value string) string {
+	return capChars(value, maxImageChars)
+}
 
 func capQuantity(value string) string { return capChars(value, maxQuantityChars) }
 
 func capChars(value string, maxChars int) string {
 	if len(value) <= maxChars {
+
 		return value
 	}
 	runes := []rune(value)
 	if len(runes) <= maxChars {
+
 		return value
 	}
 	return string(runes[:maxChars])

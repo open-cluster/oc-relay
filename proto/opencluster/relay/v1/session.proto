@@ -23,8 +23,8 @@ import "google/protobuf/duration.proto";
 import "opencluster/relay/v1/kubernetes_runtime.proto";
 import "opencluster/relay/v1/registration.proto";
 
-option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
 option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
 
 // ---------------------------------------------------------------------------------
 // Capability payload wrappers: a CLOSED oneof per direction. Adding a capability is
