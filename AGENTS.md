@@ -66,9 +66,9 @@ from, references, or depends on any private repository.
   reflection-driven dependency injection — the composition root in `cmd/` wires
   dependencies explicitly and readably.
 - Errors: no panic for expected failures; wrap causes with `%w`; error strings are
-  lowercase without trailing punctuation. Errors translate into stable protocol
-  outcomes at exactly one boundary (the capability/session mapping layer), nowhere
-  else.
+  lowercase without trailing punctuation; error types live in the package that
+  produces them. Errors translate into stable protocol outcomes at exactly one
+  boundary (the capability/session mapping layer), nowhere else.
 - Concurrency: every goroutine has an owning struct or function and a proven
   shutdown path; every queue, retry loop, result buffer, and concurrency limit is
   explicitly bounded; `context.Context` is the first parameter of blocking work and
@@ -82,6 +82,8 @@ from, references, or depends on any private repository.
   invocation (`make test`).
 - Comments state constraints the code cannot show. No narration of the next line,
   no session history, no plan-section markers, no commented-out code.
+- Measure before optimizing: performance work cites profile or benchmark evidence,
+  and prefers clarity until a real cost is demonstrated.
 
 ## Protocol rules
 
@@ -166,6 +168,7 @@ The execution loop, implemented by the `.claude/commands/` files:
   written first and failing for the right reason? (YES/NO) — any deviation from
   the plan? (YES/NO). A wrong answer invalidates the claim; stop and repair the
   workflow, not the wording.
-- Commit style and contribution rules: `CONTRIBUTING.md`. Documentation changes
-  update only affected sections and never regenerate whole documents; no
-  placeholders, no filler.
+- Commit style and contribution rules: `CONTRIBUTING.md`; one logical change per
+  commit, and `main` stays buildable and releasable at every commit. Documentation
+  is concise, scannable, and present-tense; changes update only affected sections
+  and never regenerate whole documents; no placeholders, no filler.
