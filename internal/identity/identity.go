@@ -13,8 +13,8 @@ import (
 )
 
 // Credential is the Relay's durable identity, received exactly once at enrollment.
+// The identity is the pair (OrgID, RegistrationID); Secret authenticates it.
 type Credential struct {
-	RelayID         string
 	OrgID           string
 	RegistrationID  string
 	Secret          string
@@ -24,8 +24,8 @@ type Credential struct {
 
 // String redacts the secret; the fmt package uses it for %v, %+v, and %s.
 func (c Credential) String() string {
-	return fmt.Sprintf("identity.Credential{relay=%s org=%s registration=%s secret=[REDACTED] pins=%d}",
-		c.RelayID, c.OrgID, c.RegistrationID, len(c.SPKIPins))
+	return fmt.Sprintf("identity.Credential{org=%s registration=%s secret=[REDACTED] pins=%d}",
+		c.OrgID, c.RegistrationID, len(c.SPKIPins))
 }
 
 // GoString redacts the secret for %#v as well.

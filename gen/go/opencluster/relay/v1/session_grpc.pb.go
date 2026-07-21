@@ -1,15 +1,17 @@
 // OpenCluster Relay protocol v1 — the bidirectional session stream.
 //
 // One outbound TLS connection from the Relay carries exactly one Connect stream. The
-// relay credential travels in call METADATA (verified server-side against a
-// constant-time digest — never a KDF on the connect path). The stream is a DELIVERY
-// CHANNEL ONLY: durable job state lives in the control plane's database; every job is
-// leased and fenced by (job_id, server session id, lease_epoch) under the
-// control-plane clock, and a stream disconnect can neither lose nor silently
-// complete a job.
+// relay identity and credential travel in call METADATA ("opencluster-org-id",
+// "opencluster-registration-id", "opencluster-relay-credential"; the credential is
+// verified server-side against a constant-time digest — never a KDF on the connect
+// path). The stream is a DELIVERY CHANNEL ONLY: durable job state lives in the
+// control plane's database; every job is leased and fenced by (job_id, server
+// session id, lease_epoch) under the control-plane clock, and a stream disconnect
+// can neither lose nor silently complete a job.
 //
 // Envelope evolution is ADDITIVE (new oneof variants, new fields); capability
-// argument/result messages are strict and frozen (see kubernetes_runtime.proto).
+// argument/result messages are strict and frozen (see
+// kubernetes_workload_runtime.proto).
 // Neither side uses google.protobuf.Any/Struct/Value, maps, raw JSON payloads, or
 // command/script/path fields — enforced by the CI schema-shape gate. Receivers
 // refuse messages carrying unknown fields in capability payloads (recursive

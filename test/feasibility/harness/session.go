@@ -46,7 +46,7 @@ func openSession(
 				ProtocolVersion: 1,
 				RelayVersion:    "0.0.0-feasibility",
 				Capabilities: []*relayv1.CapabilityDescriptor{
-					{CapabilityId: "kubernetes.runtime", CapabilityVersion: 1},
+					{CapabilityId: "kubernetes.workload.runtime", CapabilityVersion: 1},
 				},
 				ClusterFingerprint: "feas-fingerprint",
 				LocalPolicyHash:    "feas-policy",
@@ -106,12 +106,12 @@ func (s *session) pump(ctx context.Context, duration time.Duration) (*pumpStats,
 						LeaseEpoch: job.LeaseEpoch,
 						Outcome: &relayv1.JobResult_Result{
 							Result: &relayv1.CapabilityResult{
-								Result: &relayv1.CapabilityResult_KubernetesRuntimeV1{
-									KubernetesRuntimeV1: &relayv1.KubernetesWorkloadRuntimeResultV1{
+								Result: &relayv1.CapabilityResult_KubernetesWorkloadRuntimeV1{
+									KubernetesWorkloadRuntimeV1: &relayv1.KubernetesWorkloadRuntimeResultV1{
 										Outcome:          relayv1.KubernetesReadOutcome_KUBERNETES_READ_OUTCOME_SUCCESS,
 										ReturnedPodCount: 0,
 										Complete:         true,
-										AppliedMaxPods:   job.GetArguments().GetKubernetesRuntimeV1().GetMaxPods(),
+										AppliedMaxPods:   job.GetArguments().GetKubernetesWorkloadRuntimeV1().GetMaxPods(),
 									},
 								},
 							},

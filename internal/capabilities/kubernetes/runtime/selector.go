@@ -1,4 +1,4 @@
-// Package runtime implements the kubernetes.runtime.v1 capability: a read-only
+// Package runtime implements the kubernetes.workload.runtime.v1 capability: a read-only
 // projection of workload runtime state into the versioned public schema. This file
 // renders a workload's pod selector.
 package runtime

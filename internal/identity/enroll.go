@@ -16,8 +16,18 @@ import (
 // metadata over TLS — never in a message field, never in logs.
 const BootstrapTokenMetadataKey = "opencluster-bootstrap-token"
 
+// OrgIDMetadataKey carries the claimed organization id in Register call metadata.
+// Identity scope rides in metadata alongside the token; the request message carries
+// attestations only. The claim scopes the server-side token lookup and the per-org
+// flood partition — it grants nothing by itself.
+const OrgIDMetadataKey = "opencluster-org-id"
+
 // EnrollmentParams is the non-secret content of the registration request.
 type EnrollmentParams struct {
+	// OrgID is the organization the operator created the bootstrap token under. The
+	// control plane's response echoes the authoritative value; a mismatch refuses the
+	// enrollment without persisting anything.
+	OrgID              string
 	ProtocolVersion    uint32
 	RelayVersion       string
 	ClusterFingerprint string
@@ -37,7 +47,10 @@ func Enroll(
 	params EnrollmentParams,
 	store Store,
 ) (Credential, error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, BootstrapTokenMetadataKey, bootstrapToken)
+	ctx = metadata.AppendToOutgoingContext(ctx,
+		BootstrapTokenMetadataKey, bootstrapToken,
+		OrgIDMetadataKey, params.OrgID,
+	)
 
 	response, err := client.Register(ctx, &relayv1.RegisterRequest{
 		ProtocolVersion:    params.ProtocolVersion,
@@ -56,8 +69,16 @@ func Enroll(
 		return Credential{}, fmt.Errorf("register: %w", err)
 	}
 
+	// The response's org id is the organization the token was actually consumed under.
+	// It can differ from the claim only if something between us and the store is wrong
+	// — refuse and keep nothing rather than persist an identity we did not ask for.
+	if response.GetOrgId() != params.OrgID {
+		return Credential{}, fmt.Errorf(
+			"register: control plane bound the credential to organization %q, claimed %q: %w",
+			response.GetOrgId(), params.OrgID, ErrEnrollmentRefused)
+	}
+
 	credential := Credential{
-		RelayID:         response.GetRelayId(),
 		OrgID:           response.GetOrgId(),
 		RegistrationID:  response.GetRegistrationId(),
 		Secret:          response.GetCredential(),

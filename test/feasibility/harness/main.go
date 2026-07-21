@@ -152,8 +152,8 @@ func runSession(cfg config, conn *grpc.ClientConn) error {
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
 	}
-	fmt.Printf("register: ok in %s (relay=%s org=%s)\n",
-		time.Since(regStart).Round(time.Millisecond), reg.RelayId, reg.OrgId)
+	fmt.Printf("register: ok in %s (registration=%s org=%s)\n",
+		time.Since(regStart).Round(time.Millisecond), reg.RegistrationId, reg.OrgId)
 
 	s, err := openSession(ctx, conn, nil)
 	if err != nil {
@@ -256,7 +256,7 @@ func register(ctx context.Context, conn *grpc.ClientConn) (*relayv1.RegisterResp
 			RelayVersion:       "0.0.0-feasibility",
 			ClusterFingerprint: "feas-fingerprint",
 			Capabilities: []*relayv1.CapabilityDescriptor{
-				{CapabilityId: "kubernetes.runtime", CapabilityVersion: 1},
+				{CapabilityId: "kubernetes.workload.runtime", CapabilityVersion: 1},
 			},
 		})
 }

@@ -1,8 +1,11 @@
 // OpenCluster Relay protocol v1 — registration.
 //
-// The bootstrap token travels in call METADATA over TLS, never in a message field.
-// Register is unauthenticated-reachable and is flood-protected server-side (strict
-// global and per-IP caps, constant-work rejection of invalid tokens). The returned
+// The bootstrap token and the claimed organization id travel in call METADATA over
+// TLS ("opencluster-bootstrap-token", "opencluster-org-id"), never in a message
+// field: identity scope and secrets ride in metadata; message fields carry
+// attestations only. Register is unauthenticated-reachable and is flood-protected
+// server-side (strict global and per-claimed-org caps applied BEFORE the token is
+// examined, constant-work rejection of invalid tokens). The returned
 // durable credential is displayed to the wire exactly once; the Relay persists it to
 // its pre-created Secret (in-cluster) or credential file (beside-control-plane).
 //
@@ -38,12 +41,15 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Registration exchange. The bootstrap token rides in call metadata. EVERY refusal —
-// malformed, unknown, expired, already-consumed, or revoked — surfaces as one
-// FAILED_PRECONDITION status with no distinguishing detail (an attacker learns nothing
-// about token validity); the audit distinction stays server-side, and a second use of a
-// consumed token additionally raises a possible-interception alert server-side. Clients
-// treat that status as terminal: re-bootstrap with a fresh token, never retry.
+// Registration exchange. The bootstrap token and claimed organization id ride in call
+// metadata. EVERY refusal — malformed, unknown, expired, already-consumed, or revoked —
+// surfaces as one FAILED_PRECONDITION status with no distinguishing detail (an attacker
+// learns nothing about token validity); the audit distinction stays server-side, and a
+// second use of a consumed token additionally raises a possible-interception alert
+// server-side. Clients treat that status as terminal: re-bootstrap with a fresh token,
+// never retry. Distinct from refusal: an intake shed (flood limit) surfaces as
+// RESOURCE_EXHAUSTED — retryable, and carrying no token-validity information because it
+// is applied before the token is examined.
 type RelayRegistrationServiceClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 }
@@ -70,12 +76,15 @@ func (c *relayRegistrationServiceClient) Register(ctx context.Context, in *Regis
 // All implementations must embed UnimplementedRelayRegistrationServiceServer
 // for forward compatibility.
 //
-// Registration exchange. The bootstrap token rides in call metadata. EVERY refusal —
-// malformed, unknown, expired, already-consumed, or revoked — surfaces as one
-// FAILED_PRECONDITION status with no distinguishing detail (an attacker learns nothing
-// about token validity); the audit distinction stays server-side, and a second use of a
-// consumed token additionally raises a possible-interception alert server-side. Clients
-// treat that status as terminal: re-bootstrap with a fresh token, never retry.
+// Registration exchange. The bootstrap token and claimed organization id ride in call
+// metadata. EVERY refusal — malformed, unknown, expired, already-consumed, or revoked —
+// surfaces as one FAILED_PRECONDITION status with no distinguishing detail (an attacker
+// learns nothing about token validity); the audit distinction stays server-side, and a
+// second use of a consumed token additionally raises a possible-interception alert
+// server-side. Clients treat that status as terminal: re-bootstrap with a fresh token,
+// never retry. Distinct from refusal: an intake shed (flood limit) surfaces as
+// RESOURCE_EXHAUSTED — retryable, and carrying no token-validity information because it
+// is applied before the token is examined.
 type RelayRegistrationServiceServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	mustEmbedUnimplementedRelayRegistrationServiceServer()

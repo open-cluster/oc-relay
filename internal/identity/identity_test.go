@@ -25,7 +25,6 @@ const testToken = "bootstrap-token-EXTREMELY-secret"
 
 func testResponse() *relayv1.RegisterResponse {
 	return &relayv1.RegisterResponse{
-		RelayId:         "rly-1",
 		OrgId:           "org-a",
 		RegistrationId:  "42",
 		Credential:      "durable-credential-VERY-secret",
@@ -36,11 +35,12 @@ func testResponse() *relayv1.RegisterResponse {
 
 func testParams() EnrollmentParams {
 	return EnrollmentParams{
+		OrgID:              "org-a",
 		ProtocolVersion:    1,
 		RelayVersion:       "0.1.0",
 		ClusterFingerprint: "ns-uid-123",
 		Capabilities: []*relayv1.CapabilityDescriptor{
-			{CapabilityId: "kubernetes.runtime", CapabilityVersion: 1},
+			{CapabilityId: "kubernetes.workload.runtime", CapabilityVersion: 1},
 		},
 	}
 }
@@ -57,6 +57,9 @@ func TestEnroll_PersistsCredentialAndSendsTokenOnlyInMetadata(t *testing.T) {
 	if got := client.gotMetadata.Get(BootstrapTokenMetadataKey); len(got) != 1 || got[0] != testToken {
 		t.Fatalf("bootstrap token must travel in metadata %q, got %v", BootstrapTokenMetadataKey, got)
 	}
+	if got := client.gotMetadata.Get(OrgIDMetadataKey); len(got) != 1 || got[0] != "org-a" {
+		t.Fatalf("claimed org id must travel in metadata %q, got %v", OrgIDMetadataKey, got)
+	}
 	if client.gotRequest.GetClusterFingerprint() != "ns-uid-123" ||
 		len(client.gotRequest.GetCapabilities()) != 1 ||
 		client.gotRequest.GetProtocolVersion() != 1 {
@@ -64,7 +67,7 @@ func TestEnroll_PersistsCredentialAndSendsTokenOnlyInMetadata(t *testing.T) {
 	}
 
 	if credential.Secret != "durable-credential-VERY-secret" || credential.OrgID != "org-a" ||
-		credential.RelayID != "rly-1" || credential.RegistrationID != "42" ||
+		credential.RegistrationID != "42" ||
 		len(credential.SPKIPins) != 2 || credential.ProtocolVersion != 1 {
 		t.Fatalf("credential not mapped from response: %+v", credential.RegistrationID)
 	}
@@ -103,6 +106,24 @@ func TestEnroll_SaveFailureIsStorageForbidden_WithoutSecretInError(t *testing.T)
 	}
 }
 
+func TestEnroll_OrgEchoMismatchRefusedWithoutPersisting(t *testing.T) {
+	response := testResponse()
+	response.OrgId = "org-OTHER"
+	client := &fakeRegistrationClient{resp: response}
+	store := &memoryStore{}
+
+	_, err := Enroll(context.Background(), client, testToken, testParams(), store)
+	if !errors.Is(err, ErrEnrollmentRefused) {
+		t.Fatalf("org echo mismatch must refuse enrollment, got %v", err)
+	}
+	if strings.Contains(err.Error(), "durable-credential-VERY-secret") {
+		t.Fatalf("error must not contain the credential: %v", err)
+	}
+	if store.saved != nil {
+		t.Fatalf("a mismatched credential must never be persisted")
+	}
+}
+
 func TestLoadOnStart_MissingCredentialIsBootstrapRequired(t *testing.T) {
 	if _, err := LoadOnStart(context.Background(), &memoryStore{}); !errors.Is(err, ErrBootstrapRequired) {
 		t.Fatalf("missing credential must map to ErrBootstrapRequired, got %v", err)
@@ -130,7 +151,7 @@ func TestLoadOnStart_ReturnsTheSavedCredential_NoReBootstrap(t *testing.T) {
 }
 
 func TestCredentialPrinting_IsRedacted(t *testing.T) {
-	credential := Credential{RelayID: "rly-1", OrgID: "org-a", RegistrationID: "42",
+	credential := Credential{OrgID: "org-a", RegistrationID: "42",
 		Secret: "durable-credential-VERY-secret"}
 	for _, rendered := range []string{
 		fmt.Sprintf("%v", credential),

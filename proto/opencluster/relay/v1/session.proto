@@ -1,15 +1,17 @@
 // OpenCluster Relay protocol v1 — the bidirectional session stream.
 //
 // One outbound TLS connection from the Relay carries exactly one Connect stream. The
-// relay credential travels in call METADATA (verified server-side against a
-// constant-time digest — never a KDF on the connect path). The stream is a DELIVERY
-// CHANNEL ONLY: durable job state lives in the control plane's database; every job is
-// leased and fenced by (job_id, server session id, lease_epoch) under the
-// control-plane clock, and a stream disconnect can neither lose nor silently
-// complete a job.
+// relay identity and credential travel in call METADATA ("opencluster-org-id",
+// "opencluster-registration-id", "opencluster-relay-credential"; the credential is
+// verified server-side against a constant-time digest — never a KDF on the connect
+// path). The stream is a DELIVERY CHANNEL ONLY: durable job state lives in the
+// control plane's database; every job is leased and fenced by (job_id, server
+// session id, lease_epoch) under the control-plane clock, and a stream disconnect
+// can neither lose nor silently complete a job.
 //
 // Envelope evolution is ADDITIVE (new oneof variants, new fields); capability
-// argument/result messages are strict and frozen (see kubernetes_runtime.proto).
+// argument/result messages are strict and frozen (see
+// kubernetes_workload_runtime.proto).
 // Neither side uses google.protobuf.Any/Struct/Value, maps, raw JSON payloads, or
 // command/script/path fields — enforced by the CI schema-shape gate. Receivers
 // refuse messages carrying unknown fields in capability payloads (recursive
@@ -20,7 +22,7 @@ syntax = "proto3";
 package opencluster.relay.v1;
 
 import "google/protobuf/duration.proto";
-import "opencluster/relay/v1/kubernetes_runtime.proto";
+import "opencluster/relay/v1/kubernetes_workload_runtime.proto";
 import "opencluster/relay/v1/registration.proto";
 
 option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
@@ -33,13 +35,13 @@ option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/re
 
 message CapabilityArguments {
   oneof arguments {
-    KubernetesWorkloadRuntimeArgsV1 kubernetes_runtime_v1 = 10;
+    KubernetesWorkloadRuntimeArgsV1 kubernetes_workload_runtime_v1 = 10;
   }
 }
 
 message CapabilityResult {
   oneof result {
-    KubernetesWorkloadRuntimeResultV1 kubernetes_runtime_v1 = 10;
+    KubernetesWorkloadRuntimeResultV1 kubernetes_workload_runtime_v1 = 10;
   }
 }
 
@@ -74,6 +76,9 @@ message Hello {
   repeated InFlightJob in_flight = 8;
 }
 
+// Proves session liveness ONLY — never job progress or completion. Job truth advances
+// exclusively through the durable store; leases expire on the control-plane clock
+// regardless of heartbeats.
 message Heartbeat {
   uint64 sequence = 1;
   // Attestations refreshed between hellos; last-seen is stamped server-side.
@@ -81,12 +86,16 @@ message Heartbeat {
   uint32 in_flight_count = 3;
 }
 
-// Assignment received and queued for execution.
+// Assignment received and queued for execution. Proves reception ONLY — the job was
+// already durably leased when it was claimed for dispatch, so this changes no durable
+// state and promises nothing about execution. Duplicates are ignored.
 message JobAck {
   string job_id = 1;
   uint64 lease_epoch = 2;
 }
 
+// Execution began on the Relay. Advisory: no durable job-state transition — the lease
+// already covers the job — and beginning proves nothing about finishing.
 message JobStarted {
   string job_id = 1;
   uint64 lease_epoch = 2;
@@ -110,6 +119,10 @@ message JobFailure {
   string detail = 2;
 }
 
+// A job's outcome, NOT its durable fate: nothing is final until the control plane's
+// recording transaction commits. The Relay retains the result in its bounded unacked
+// buffer and resends it until a definitive ResultAck; recording is idempotent, so
+// resends are safe.
 message JobResult {
   string job_id = 1;
   // Echoes the assignment's epoch — the fence's wire round-trip. Results from a
@@ -123,6 +136,9 @@ message JobResult {
   int64 execution_duration_ms = 5;
 }
 
+// Cancellation processing outcome. Changes no durable state itself: an aborted job's
+// terminal outcome still arrives as a JobResult failure (KIND_CANCELLED) — there is
+// exactly one write path into job truth.
 message CancelAck {
   enum Disposition {
     DISPOSITION_UNSPECIFIED = 0;
@@ -148,6 +164,10 @@ message RotationConfirm {
   string rotation_id = 1;
 }
 
+// Relay → control violation report, sent before the Relay disconnects. The control
+// plane, as the gRPC server, signals its own refusals by terminating the stream with a
+// status instead. Neither direction's protocol error touches durable job state: leases
+// and the periodic sweep own recovery.
 message ProtocolError {
   enum Code {
     CODE_UNSPECIFIED = 0;
@@ -189,6 +209,10 @@ message SessionAccepted {
   uint32 max_send_bytes = 5;
 }
 
+// Sent only AFTER the durable claim transaction commits (queued → leased, owner = this
+// session, epoch incremented). The assignment message itself is pure delivery: if it is
+// lost, the due-work sweep and on-connect catch-up redeliver under the same or a
+// successor lease — never a second durable claim for the same live lease.
 message JobAssignment {
   string job_id = 1;
   // The Relay verifies BOTH against its bootstrap-bound identity; a mismatch is
@@ -208,11 +232,18 @@ message JobAssignment {
   CapabilityArguments arguments = 10;
 }
 
+// Advisory request to stop executing. The job stays leased until its outcome is
+// recorded or the lease expires; a result already produced when this arrives wins and
+// is delivered anyway (see CancelAck).
 message Cancellation {
   string job_id = 1;
   uint64 lease_epoch = 2;
 }
 
+// Sent ONLY after the durable fate of the result is known post-commit: RECORDED and
+// ALREADY_RECORDED follow the recording transaction's commit (or a read of the
+// existing terminal row); STALE follows a post-commit classification. Never
+// optimistic — an unsent ack costs only a safe resend.
 message ResultAck {
   enum Disposition {
     DISPOSITION_UNSPECIFIED = 0;
@@ -236,6 +267,9 @@ message CredentialRotation {
   string new_credential = 2;
 }
 
+// Stop accepting new assignments, finish or abandon in-flight work within the
+// deadline, flush unacked results, then disconnect. Changes no durable job state:
+// anything unfinished is recovered by lease expiry and the sweep.
 message DrainInstruction {
   google.protobuf.Duration deadline = 1;
 }

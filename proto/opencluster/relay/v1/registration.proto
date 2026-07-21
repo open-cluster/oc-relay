@@ -1,8 +1,11 @@
 // OpenCluster Relay protocol v1 — registration.
 //
-// The bootstrap token travels in call METADATA over TLS, never in a message field.
-// Register is unauthenticated-reachable and is flood-protected server-side (strict
-// global and per-IP caps, constant-work rejection of invalid tokens). The returned
+// The bootstrap token and the claimed organization id travel in call METADATA over
+// TLS ("opencluster-bootstrap-token", "opencluster-org-id"), never in a message
+// field: identity scope and secrets ride in metadata; message fields carry
+// attestations only. Register is unauthenticated-reachable and is flood-protected
+// server-side (strict global and per-claimed-org caps applied BEFORE the token is
+// examined, constant-work rejection of invalid tokens). The returned
 // durable credential is displayed to the wire exactly once; the Relay persists it to
 // its pre-created Secret (in-cluster) or credential file (beside-control-plane).
 //
@@ -19,7 +22,7 @@ option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/re
 
 // One advertised capability at one compiled-in schema version.
 message CapabilityDescriptor {
-  // Closed capability identifier, e.g. "kubernetes.runtime".
+  // Closed capability identifier, e.g. "kubernetes.workload.runtime".
   string capability_id = 1;
   // Compiled-in schema version, e.g. 1. The Relay refuses jobs at any other version.
   uint32 capability_version = 2;
@@ -39,11 +42,16 @@ message RegisterRequest {
 }
 
 message RegisterResponse {
-  // Server-assigned durable relay identity.
-  string relay_id = 1;
-  // Organization this registration is bound to. The Relay stores it and verifies
-  // every job assignment against it (a mismatch is refused and audited as a
-  // control-plane-compromise indicator).
+  // One relay identity exists: (org_id, registration_id). A separate relay_id once
+  // occupied field 1 and was removed before any release as a redundant second name
+  // for the same identity.
+  reserved 1;
+  reserved "relay_id";
+
+  // Organization this registration is bound to — authoritative echo of the claimed
+  // organization the token was consumed under. The Relay verifies it matches its
+  // claim, stores it, and verifies every job assignment against it (a mismatch is
+  // refused and audited as a control-plane-compromise indicator).
   string org_id = 2;
   // Registration identity, verified on every job assignment alongside org_id.
   string registration_id = 3;
@@ -58,12 +66,15 @@ message RegisterResponse {
   uint32 protocol_version = 6;
 }
 
-// Registration exchange. The bootstrap token rides in call metadata. EVERY refusal —
-// malformed, unknown, expired, already-consumed, or revoked — surfaces as one
-// FAILED_PRECONDITION status with no distinguishing detail (an attacker learns nothing
-// about token validity); the audit distinction stays server-side, and a second use of a
-// consumed token additionally raises a possible-interception alert server-side. Clients
-// treat that status as terminal: re-bootstrap with a fresh token, never retry.
+// Registration exchange. The bootstrap token and claimed organization id ride in call
+// metadata. EVERY refusal — malformed, unknown, expired, already-consumed, or revoked —
+// surfaces as one FAILED_PRECONDITION status with no distinguishing detail (an attacker
+// learns nothing about token validity); the audit distinction stays server-side, and a
+// second use of a consumed token additionally raises a possible-interception alert
+// server-side. Clients treat that status as terminal: re-bootstrap with a fresh token,
+// never retry. Distinct from refusal: an intake shed (flood limit) surfaces as
+// RESOURCE_EXHAUSTED — retryable, and carrying no token-validity information because it
+// is applied before the token is examined.
 service RelayRegistrationService {
   rpc Register(RegisterRequest) returns (RegisterResponse);
 }
