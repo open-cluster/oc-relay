@@ -8,7 +8,7 @@ import (
 	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
 )
 
-// Per-kind workload summary mapping, matching the S1B-3 contract. Deployment and
+// Per-kind workload summary mapping into the versioned public schema. Deployment and
 // StatefulSet read desired from spec.replicas (nil coalesces to zero) and the
 // remaining counters from status; DaemonSet has no spec.replicas — every counter is
 // a status field. The kind literal is the normalized lowercase vocabulary the

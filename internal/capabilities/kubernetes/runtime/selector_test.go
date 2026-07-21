@@ -6,12 +6,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// These tests pin the S1B-3 selector contract the Go capability must match for parity.
-// The recorded S1B-3 exit-review bug: a matchExpressions-only workload built an EMPTY
-// selector and listed the WHOLE namespace, misattributing unrelated pods' runtime state.
-// The fix renders the COMPLETE selector (matchLabels + matchExpressions in order) and,
-// when it cannot represent the selector, REFUSES to enumerate rather than falling back to
-// an empty filter that would match everything.
+// These tests pin the selector-rendering contract. The defect class they guard against:
+// a matchExpressions-only workload rendering an EMPTY selector string, which would list
+// the WHOLE namespace and misattribute unrelated pods' runtime state. The contract
+// renders the COMPLETE selector (matchLabels + matchExpressions in order) and, when it
+// cannot represent the selector, REFUSES to enumerate rather than falling back to an
+// empty filter that would match everything.
 
 func TestRenderSelector_MatchLabelsOnly(t *testing.T) {
 	sel := &metav1.LabelSelector{
@@ -40,7 +40,7 @@ func TestRenderSelector_MatchExpressionsOnly_IsNotEmpty(t *testing.T) {
 		t.Fatalf("representable matchExpressions selector wrongly refused")
 	}
 	if got == "" {
-		t.Fatalf("matchExpressions-only selector rendered EMPTY — the S1B-3 whole-namespace bug")
+		t.Fatalf("matchExpressions-only selector rendered EMPTY — the whole-namespace defect")
 	}
 	if got != "app in (web,api)" {
 		t.Fatalf("unexpected In render: %q", got)

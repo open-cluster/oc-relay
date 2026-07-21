@@ -1,4 +1,4 @@
-// Minimal controllable HTTP CONNECT proxy for the R1-F feasibility gate: simulates a
+// Minimal controllable HTTP CONNECT proxy for the transport feasibility gate: simulates a
 // corporate egress proxy. It tunnels TLS byte-for-byte (never touching the HTTP/2
 // inside — the property the gate verifies) and exposes a control port that drops
 // every active tunnel on demand (the interruption scenario) plus an optional idle

@@ -12,12 +12,12 @@ import (
 	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
 )
 
-// These tests pin the S1B-3 pod/container runtime mapping contract for parity with the
-// central oracle. The sharpest point is readiness POLARITY: a pod is ready only when a
-// Ready condition explicitly reports status "True" — a missing condition list, a missing
-// Ready condition, or any other status value means NOT ready. (This is the inverse of
-// the discovery-side EndpointSlice invariant, where a nil ready field means ready; that
-// invariant belongs to R2 and must never bleed into this mapping.)
+// These tests pin the pod/container runtime mapping contract. The sharpest point is
+// readiness POLARITY: a pod is ready only when a Ready condition explicitly reports
+// status "True" — a missing condition list, a missing Ready condition, or any other
+// status value means NOT ready. (This is the inverse of the EndpointSlice convention,
+// where a nil ready field means ready; that convention belongs to service discovery and
+// must never bleed into this mapping.)
 
 func TestMapPod_ReadyPolarity(t *testing.T) {
 	cases := []struct {
@@ -132,9 +132,9 @@ func TestMapPod_ContainerStatePrecedence(t *testing.T) {
 	}
 }
 
-// The central OOM-absence claim greps the literal "OOMKilled" on BOTH the current-state
-// termination and last_termination; this mapping must preserve the reason verbatim on
-// both fields and default an empty reason to "Unknown", matching the oracle.
+// The control plane's OOM-absence detection reads the literal "OOMKilled" on BOTH the
+// current-state termination and last_termination; this mapping must preserve the reason
+// verbatim on both fields and default an empty reason to the stable literal "Unknown".
 func TestMapPod_TerminationContract(t *testing.T) {
 	finished := metav1.NewTime(time.Date(2026, 7, 20, 9, 30, 0, 0, time.UTC))
 	pod := &corev1.Pod{Status: corev1.PodStatus{
@@ -195,7 +195,7 @@ func TestMapPod_TerminationContract(t *testing.T) {
 }
 
 // Every string admitted from the source is untrusted and capped at the contract
-// boundary with the same per-field ceilings as the central projection: identifiers 253,
+// boundary with the control plane's per-field ceilings: identifiers 253,
 // reasons 128, images 256.
 func TestMapPod_IdentityFieldsAndCaps(t *testing.T) {
 	longName := strings.Repeat("n", 300)
@@ -265,7 +265,7 @@ func TestMapPod_ContainerPassthroughFields(t *testing.T) {
 	}
 }
 
-// The cap counts runes (recorded deviation from the central UTF-16 slicing): an
+// The cap counts runes (recorded deviation from the control plane's UTF-16 slicing): an
 // over-cap non-BMP string keeps exactly maxChars runes and never emits a lone
 // surrogate or a torn UTF-8 sequence.
 func TestCapChars_NonBMPInput(t *testing.T) {

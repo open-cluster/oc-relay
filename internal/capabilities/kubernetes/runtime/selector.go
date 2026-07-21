@@ -1,6 +1,6 @@
-// Package runtime implements the kubernetes.runtime.v1 capability: a read-only workload
-// runtime projection matching the verified S1B-3 semantic contract. This file renders a
-// workload's pod selector.
+// Package runtime implements the kubernetes.runtime.v1 capability: a read-only
+// projection of workload runtime state into the versioned public schema. This file
+// renders a workload's pod selector.
 package runtime
 
 import (
@@ -10,16 +10,16 @@ import (
 )
 
 // RenderSelector renders a workload's LabelSelector into the label-selector string used
-// to LIST its pods, matching the S1B-3 contract exactly. It returns (rendered, true) when
-// the selector is representable, and ("", false) when it is not — an unrepresentable
-// selector (nil, zero terms, or an unknown operator) REFUSES enumeration rather than
-// falling back to an empty filter that would list the whole namespace and misattribute
-// unrelated pods (the S1B-3 exit-review bug fix). The caller maps a refusal to an
-// unresolved_identity coverage gap and withholds all presence and absence evidence.
+// to LIST its pods. It returns (rendered, true) when the selector is representable, and
+// ("", false) when it is not — an unrepresentable selector (nil, zero terms, or an
+// unknown operator) REFUSES enumeration rather than falling back to an empty filter,
+// because an empty filter would list the whole namespace and attribute unrelated pods'
+// runtime state to this workload. The caller maps a refusal to an unresolved-identity
+// coverage gap and withholds all presence and absence evidence.
 //
-// Rendering order matches the oracle: matchLabels (key=value) first, then matchExpressions
-// in source order — In as "key in (v1,v2)", NotIn as "key notin (v1,v2)", Exists as "key",
-// DoesNotExist as "!key".
+// Rendering is complete and deterministic per term kind: matchLabels (key=value) first,
+// then matchExpressions in source order — In as "key in (v1,v2)", NotIn as
+// "key notin (v1,v2)", Exists as "key", DoesNotExist as "!key".
 func RenderSelector(selector *metav1.LabelSelector) (string, bool) {
 	if selector == nil {
 		return "", false

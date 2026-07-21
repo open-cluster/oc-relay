@@ -1,5 +1,5 @@
-// R1-F feasibility harness: exercises the v1 session contract against the throwaway
-// .NET Kestrel host across edge topologies (direct TLS, Caddy h2c upstream, HTTP
+// Transport feasibility harness: exercises the v1 session contract against a throwaway
+// control-plane test server across edge topologies (direct TLS, h2c reverse proxy, HTTP
 // CONNECT proxy, interruption, idle, certificate rotation, server restart).
 //
 // This is gate instrumentation, not the Relay: no durable identity, no capability
@@ -47,7 +47,7 @@ func main() {
 	flag.StringVar(&cfg.scenario, "scenario", "session", "session|idle|interrupt")
 	flag.StringVar(&cfg.target, "target", "localhost:15443", "host:port")
 	flag.BoolVar(&cfg.useTLS, "tls", true, "dial with TLS (false = h2c)")
-	flag.BoolVar(&cfg.insecure, "insecure", false, "skip TLS verification (Caddy local CA scenario)")
+	flag.BoolVar(&cfg.insecure, "insecure", false, "skip TLS verification (local-CA proxy scenario)")
 	flag.StringVar(&pins, "pin", "", "comma-separated base64 SPKI pins (empty = no pinning)")
 	flag.StringVar(&cfg.proxy, "proxy", "", "HTTP CONNECT proxy addr (sets HTTPS_PROXY)")
 	flag.DurationVar(&cfg.duration, "duration", 15*time.Second, "scenario duration")
@@ -199,7 +199,7 @@ func runIdle(cfg config, conn *grpc.ClientConn) error {
 // runInterrupt: run a session through the controllable CONNECT proxy, have the
 // proxy drop every tunnel mid-stream, then reconnect and verify delivery resumes.
 // Reports detection time and reconnect-to-first-delivery time, and carries an
-// in-flight roster on the second hello (the reconciliation shape R1 implements).
+// in-flight roster on the second hello (the production reconciliation shape).
 func runInterrupt(cfg config, conn *grpc.ClientConn) error {
 	if cfg.proxy == "" {
 		return errors.New("interrupt scenario requires -proxy")

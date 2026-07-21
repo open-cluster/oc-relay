@@ -34,7 +34,7 @@ documentation.
 - `proto/opencluster/relay/v1/` — the protocol source of truth (Buf-managed)
 - `gen/go/` — committed generated Go (drift-gated in CI)
 - `docs/` — protocol and design documentation
-- Go implementation packages arrive with the R1 slice (`cmd/`, `internal/`)
+- Go implementation packages arrive with the first implementation slice (`cmd/`, `internal/`)
 
 ## Development
 

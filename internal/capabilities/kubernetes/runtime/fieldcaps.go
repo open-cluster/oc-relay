@@ -1,12 +1,12 @@
 package runtime
 
 // Named per-field caps for every string admitted from a Kubernetes source, sharing the
-// central projection's contract-boundary ceilings. All admitted source strings are
+// control plane's contract-boundary ceilings. All admitted source strings are
 // untrusted; capping bounds what a hostile or misbehaving source can push into results.
 // Free-text Kubernetes message fields are structurally absent from the projection and
 // deliberately have no cap here.
 //
-// Deliberate, recorded deviation from the central implementation: it slices UTF-16
+// Deliberate, recorded compatibility deviation: the control plane slices UTF-16
 // code units; this cap counts runes. Both agree on every BMP (and thus every ASCII)
 // input — all real identifiers, reasons, and images — and diverge only for over-cap
 // strings containing non-BMP characters, where rune capping is the safer behavior: it

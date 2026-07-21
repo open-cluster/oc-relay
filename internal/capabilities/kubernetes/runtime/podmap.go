@@ -8,11 +8,10 @@ import (
 	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
 )
 
-// MapPod projects a pod's runtime state into the frozen kubernetes.runtime.v1 wire
-// shape, matching the S1B-3 contract. This file is the single mapping boundary from
-// Kubernetes API objects to the capability result; nothing else translates pod state.
-// The pod must be non-nil (callers hold an API-read object); all sub-structs are value
-// types, so a zero pod maps safely.
+// MapPod converts a Kubernetes Pod into the versioned runtime result.
+// It is the single mapping boundary between Kubernetes API objects and the
+// public capability schema. Missing optional Kubernetes fields are represented
+// by their documented zero values.
 func MapPod(pod *corev1.Pod) *relayv1.KubernetesPodRuntime {
 	containers := make([]*relayv1.KubernetesContainerRuntime, 0, len(pod.Status.ContainerStatuses))
 	for _, status := range pod.Status.ContainerStatuses {
@@ -20,7 +19,7 @@ func MapPod(pod *corev1.Pod) *relayv1.KubernetesPodRuntime {
 	}
 	// Go's API types carry no absent-vs-empty distinction (phase is a plain string), so
 	// an explicitly empty value and a missing one both default to "Unknown". Recorded
-	// deviation: the central implementation defaults only a null phase and would pass a
+	// deviation: the control-plane reference behavior defaults only a null phase and would pass a
 	// hostile explicit "" through; every real pod behaves identically on both sides.
 	// The same applies to the termination reason default below.
 	phase := string(pod.Status.Phase)
@@ -43,7 +42,7 @@ func MapPod(pod *corev1.Pod) *relayv1.KubernetesPodRuntime {
 }
 
 // unscheduledReason reports the reason of a PodScheduled condition explicitly at
-// "False" — empty for a scheduled (or not-yet-reported) pod, matching the oracle.
+// "False" — empty for a scheduled (or not-yet-reported) pod.
 func unscheduledReason(conditions []corev1.PodCondition) string {
 	for _, condition := range conditions {
 		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
@@ -64,7 +63,7 @@ func mapContainer(status corev1.ContainerStatus) *relayv1.KubernetesContainerRun
 	}
 }
 
-// mapState mirrors the oracle's precedence exactly: Running > Terminated > Waiting,
+// mapState maps container state with precedence Running > Terminated > Waiting,
 // with a fully empty state reported as Waiting with no reason.
 func mapState(state corev1.ContainerState) *relayv1.KubernetesContainerState {
 	if state.Running != nil {
@@ -95,8 +94,8 @@ func mapTermination(terminated *corev1.ContainerStateTerminated) *relayv1.Kubern
 	}
 	reason := terminated.Reason
 	if reason == "" {
-		// The oracle reports "Unknown" for a reasonless termination; the literal reason
-		// string is the central OOM-detection key, so the default must match exactly.
+		// A reasonless termination reports "Unknown"; the literal reason
+		// string is the OOM-detection key consumed centrally, so the default must be stable.
 		reason = "Unknown"
 	}
 	return &relayv1.KubernetesContainerTermination{
@@ -116,7 +115,7 @@ func mapTime(t metav1.Time) *timestamppb.Timestamp {
 
 // podReady is true only when a Ready condition explicitly reports "True". A missing
 // condition list, a missing Ready condition, or any other status value is NOT ready —
-// readiness is never inferred. The first Ready condition wins, matching the oracle.
+// readiness is never inferred. The first Ready condition in source order wins.
 func podReady(conditions []corev1.PodCondition) bool {
 	for _, condition := range conditions {
 		if condition.Type == corev1.PodReady {

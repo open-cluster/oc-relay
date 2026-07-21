@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// These tests pin the S1B-3 per-kind replica-counter contract. The sharp point:
+// These tests pin the per-kind replica-counter contract. The sharp point:
 // Deployment and StatefulSet read desired from spec.replicas (nil coalesces to zero)
 // and the ready/updated/available counters from status, while DaemonSet has no
 // spec.replicas at all — desired is status.desiredNumberScheduled and ready is
