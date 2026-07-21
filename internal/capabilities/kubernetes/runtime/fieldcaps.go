@@ -19,6 +19,8 @@ const (
 	maxReasonChars = 128
 	// maxImageChars bounds image references (registry/repository:tag@digest).
 	maxImageChars = 256
+	// maxQuantityChars bounds resource quantity strings (e.g. 500m, 2Gi).
+	maxQuantityChars = 32
 )
 
 func capIdentifier(value string) string { return capChars(value, maxIdentifierChars) }
@@ -26,6 +28,8 @@ func capIdentifier(value string) string { return capChars(value, maxIdentifierCh
 func capReason(value string) string { return capChars(value, maxReasonChars) }
 
 func capImage(value string) string { return capChars(value, maxImageChars) }
+
+func capQuantity(value string) string { return capChars(value, maxQuantityChars) }
 
 func capChars(value string, maxChars int) string {
 	if len(value) <= maxChars {
