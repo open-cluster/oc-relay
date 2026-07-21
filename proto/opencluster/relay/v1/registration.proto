@@ -58,9 +58,12 @@ message RegisterResponse {
   uint32 protocol_version = 6;
 }
 
-// Registration exchange. The bootstrap token rides in call metadata; a consumed or
-// invalid token fails the RPC with a typed status and is audited (second use of a
-// consumed token additionally raises a possible-interception alert).
+// Registration exchange. The bootstrap token rides in call metadata. EVERY refusal —
+// malformed, unknown, expired, already-consumed, or revoked — surfaces as one
+// FAILED_PRECONDITION status with no distinguishing detail (an attacker learns nothing
+// about token validity); the audit distinction stays server-side, and a second use of a
+// consumed token additionally raises a possible-interception alert server-side. Clients
+// treat that status as terminal: re-bootstrap with a fresh token, never retry.
 service RelayRegistrationService {
   rpc Register(RegisterRequest) returns (RegisterResponse);
 }

@@ -38,9 +38,12 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Registration exchange. The bootstrap token rides in call metadata; a consumed or
-// invalid token fails the RPC with a typed status and is audited (second use of a
-// consumed token additionally raises a possible-interception alert).
+// Registration exchange. The bootstrap token rides in call metadata. EVERY refusal —
+// malformed, unknown, expired, already-consumed, or revoked — surfaces as one
+// FAILED_PRECONDITION status with no distinguishing detail (an attacker learns nothing
+// about token validity); the audit distinction stays server-side, and a second use of a
+// consumed token additionally raises a possible-interception alert server-side. Clients
+// treat that status as terminal: re-bootstrap with a fresh token, never retry.
 type RelayRegistrationServiceClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 }
@@ -67,9 +70,12 @@ func (c *relayRegistrationServiceClient) Register(ctx context.Context, in *Regis
 // All implementations must embed UnimplementedRelayRegistrationServiceServer
 // for forward compatibility.
 //
-// Registration exchange. The bootstrap token rides in call metadata; a consumed or
-// invalid token fails the RPC with a typed status and is audited (second use of a
-// consumed token additionally raises a possible-interception alert).
+// Registration exchange. The bootstrap token rides in call metadata. EVERY refusal —
+// malformed, unknown, expired, already-consumed, or revoked — surfaces as one
+// FAILED_PRECONDITION status with no distinguishing detail (an attacker learns nothing
+// about token validity); the audit distinction stays server-side, and a second use of a
+// consumed token additionally raises a possible-interception alert server-side. Clients
+// treat that status as terminal: re-bootstrap with a fresh token, never retry.
 type RelayRegistrationServiceServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	mustEmbedUnimplementedRelayRegistrationServiceServer()
