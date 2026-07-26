@@ -14,9 +14,11 @@ capabilities compiled into the binary — returning bounded structured results.
 The Relay contains no model code, no AI reasoning, no incident state, no shell, no
 scripts, no dynamic plugins, and no generic remote-execution mechanism. Every
 capability is a compiled Go handler with a frozen Protobuf argument/result schema,
-enforced by build-failing gates rather than convention — the cgo-disabled build is
-wired today and the remaining banned-API gates land with the capability surfaces
-they guard, before any release.
+enforced by build-failing gates rather than convention: the cgo-disabled build, an
+import-graph and AST gate suite (no process spawning, no dynamic loading, no
+exec/port-forward surfaces, capability packages confined to the read-only Kubernetes
+port), a descriptor schema-shape gate that keeps dynamic payload types and
+command-like fields out of the protocol, and a pinned depguard/forbidigo lint layer.
 
 ## What data leaves the cluster
 
@@ -34,7 +36,9 @@ documentation.
 - `proto/opencluster/relay/v1/` — the protocol source of truth (Buf-managed)
 - `gen/go/` — committed generated Go (drift-gated in CI)
 - `docs/` — protocol and design documentation
-- Go implementation packages arrive with the first implementation slice (`cmd/`, `internal/`)
+- `cmd/opencluster-relay/` — the composition root
+- `internal/` — identity, session runtime, read-only Kubernetes port, capabilities,
+  configuration, pinned transport, and the local audit trail
 
 ## Development
 
