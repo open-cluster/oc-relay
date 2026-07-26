@@ -3,6 +3,8 @@
 BUF_VERSION := v1.47.2
 PROTOC_GEN_GO_VERSION := v1.36.5
 PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
+STATICCHECK_VERSION := 2025.1.1
+GOLANGCI_LINT_VERSION := v2.12.2
 
 .PHONY: tools lint gen gen-check build test breaking descriptor
 
@@ -10,12 +12,16 @@ tools:
 	go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+	go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 lint:
 	buf lint
 	buf format --diff --exit-code
 	gofmt -l . | (! grep .)
 	go vet ./...
+	staticcheck ./...
+	golangci-lint run
 
 gen:
 	buf generate

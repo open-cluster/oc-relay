@@ -1,0 +1,44 @@
+# Pinned lint gate (golangci-lint v2.12.2 — install via `make tools`).
+# depguard and forbidigo are the convention-level layer of the no-command guarantee;
+# the build-failing layer lives in internal/gates (import-graph, AST, and descriptor
+# tests immune to nolint directives). Both must stay green.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - depguard
+    - forbidigo
+  settings:
+    depguard:
+      rules:
+        no-command:
+          deny:
+            - pkg: os/exec
+              desc: process spawning is banned in the Relay
+            - pkg: plugin
+              desc: dynamic code loading is banned in the Relay
+            - pkg: golang.org/x/sys/unix
+              desc: raw syscall surfaces are banned in the Relay
+            - pkg: k8s.io/client-go/tools/remotecommand
+              desc: exec/attach into containers is banned in the Relay
+            - pkg: k8s.io/client-go/tools/portforward
+              desc: port-forwarding is banned in the Relay
+            - pkg: k8s.io/client-go/transport/spdy
+              desc: the SPDY upgrade transport exists only for exec/port-forward
+        read-only-port:
+          files:
+            - "**/internal/capabilities/**"
+          deny:
+            - pkg: k8s.io/client-go
+              desc: capability packages read the cluster only through internal/kube
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.StartProcess$
+        - pattern: ^syscall\.(Exec|ForkExec|StartProcess|CreateProcess)$
+        - pattern: ^plugin\.Open$
+  exclusions:
+    paths:
+      - gen
+      - test/feasibility
