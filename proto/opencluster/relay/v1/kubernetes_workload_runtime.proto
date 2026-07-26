@@ -15,7 +15,7 @@ package opencluster.relay.v1;
 import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
-option go_package = "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1;relayv1";
+option go_package = "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1;relayv1";
 
 // Closed workload vocabulary. The control plane validates before dispatch and the
 // Relay re-validates on receipt; there is no fall-through default branch.

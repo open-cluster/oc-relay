@@ -2,7 +2,7 @@
 // (see docs/naming.md). The rename is one atomic change across five surfaces (module
 // path, proto package, csharp_namespace, image name, chart name) and must complete
 // before the first persistent deployment.
-module github.com/OCluster/opencluster-relay
+module github.com/open-cluster/oc-relay
 
 go 1.26
 

@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 type config struct {

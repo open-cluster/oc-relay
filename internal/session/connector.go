@@ -5,9 +5,9 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
-	"github.com/OCluster/opencluster-relay/internal/identity"
+	"github.com/open-cluster/oc-relay/internal/identity"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // Session-establishment metadata keys. Identity scope and the credential ride in call

@@ -8,9 +8,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/OCluster/opencluster-relay/internal/kube"
+	"github.com/open-cluster/oc-relay/internal/kube"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // Pod-list bounds: one bounded page, the customer's local caps may lower the effective

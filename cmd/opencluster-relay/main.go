@@ -24,15 +24,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/OCluster/opencluster-relay/internal/audit"
-	"github.com/OCluster/opencluster-relay/internal/capabilities/kubernetes/runtime"
-	"github.com/OCluster/opencluster-relay/internal/config"
-	"github.com/OCluster/opencluster-relay/internal/identity"
-	"github.com/OCluster/opencluster-relay/internal/kube"
-	"github.com/OCluster/opencluster-relay/internal/session"
-	"github.com/OCluster/opencluster-relay/internal/transport"
+	"github.com/open-cluster/oc-relay/internal/audit"
+	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/runtime"
+	"github.com/open-cluster/oc-relay/internal/config"
+	"github.com/open-cluster/oc-relay/internal/identity"
+	"github.com/open-cluster/oc-relay/internal/kube"
+	"github.com/open-cluster/oc-relay/internal/session"
+	"github.com/open-cluster/oc-relay/internal/transport"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // version is stamped at release build time via -ldflags; "dev" otherwise.

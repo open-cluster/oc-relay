@@ -55,7 +55,7 @@ jobs:
           go install github.com/google/go-licenses@v1.6.0
           go-licenses check ./... \
             --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC,MPL-2.0 \
-            --ignore github.com/OCluster/opencluster-relay || true
+            --ignore github.com/open-cluster/oc-relay || true
           # || true until first-party packages exist; flips to hard-fail with R1 code.
 
       - name: Secret scan (gitleaks, full history)

@@ -3,7 +3,7 @@ package session
 import (
 	"sync"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // unacked retains every produced result until a definitive ResultAck arrives. It is the

@@ -13,9 +13,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/OCluster/opencluster-relay/internal/session"
+	"github.com/open-cluster/oc-relay/internal/session"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // Executor decorates a session.Executor with execution measurement: it stamps the

@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // sendStream is the outbound half of the Connect stream. grpc's generated

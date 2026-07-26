@@ -21,10 +21,10 @@ import (
 
 	// Blank import so the generated descriptors register themselves in
 	// protoregistry.GlobalFiles, which the schema-shape gate iterates.
-	_ "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	_ "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
-const modulePath = "github.com/OCluster/opencluster-relay"
+const modulePath = "github.com/open-cluster/oc-relay"
 
 // bannedImports can appear nowhere in the repository, tests included. Each entry is a
 // capability the Relay must not merely avoid but be UNABLE to acquire: process

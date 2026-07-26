@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OCluster/opencluster-relay/internal/config"
+	"github.com/open-cluster/oc-relay/internal/config"
 )
 
 func TestReadBootstrapToken_TrimsAndRefusesEmpty(t *testing.T) {

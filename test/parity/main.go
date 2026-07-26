@@ -18,10 +18,10 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/OCluster/opencluster-relay/internal/capabilities/kubernetes/runtime"
-	"github.com/OCluster/opencluster-relay/internal/kube"
+	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/runtime"
+	"github.com/open-cluster/oc-relay/internal/kube"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 func main() {
