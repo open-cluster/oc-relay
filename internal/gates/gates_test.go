@@ -137,6 +137,12 @@ func TestTheProtocolModuleDoesNotReachKubernetes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the protocol module: %v", err)
 	}
+	// A package that failed to load carries no imports, so the walk below would find no
+	// Kubernetes and report success. Fail on the load error instead: a gate that reports
+	// green because it could not see anything is the failure mode it exists to prevent.
+	if packages.PrintErrors(loaded) > 0 {
+		t.Fatal("protocol packages failed to load")
+	}
 	if len(loaded) == 0 {
 		t.Fatal("no protocol packages loaded")
 	}

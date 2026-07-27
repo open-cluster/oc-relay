@@ -19,6 +19,9 @@ PR, not after.
 - No generated-code edits by hand; `make gen` owns the generated sources under `gen/go`.
   Its `go.mod` and `go.sum` are the exception: they define the contract module and are
   maintained by hand, so keep them to what the generated code actually needs.
+- A contract change reaches consumers only when it is tagged `gen/go/vX.Y.Z`. Merging one
+  without a tag leaves every consumer on the previous contract with nothing reporting it,
+  so tag in the same change that lands the proto edit.
 
 ## Commit style
 

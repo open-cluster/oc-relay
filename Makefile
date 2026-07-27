@@ -8,9 +8,13 @@ GOLANGCI_LINT_VERSION := v2.12.2
 
 # The generated contract is its own module so consumers can speak the protocol without
 # inheriting the Kubernetes dependency graph. Nested modules are not reached by "./...",
-# so every per-module gate below has to name it: a gate that stops covering part of the
-# repository the moment that part moves is worse than no gate, because it still reports
-# green.
+# so each gate below names it: a gate that stops covering part of the repository the
+# moment that part moves is worse than no gate, because it still reports green.
+#
+# golangci-lint is the deliberate exception. Its rules here ban imports and calls in
+# hand-written Relay code, and this repository's configuration already excludes generated
+# sources; the equivalent guarantee for the contract module comes from internal/gates,
+# which loads it explicitly.
 PROTOCOL_MODULE := gen/go
 
 .PHONY: tools lint gen gen-check build test breaking descriptor
@@ -47,6 +51,7 @@ build:
 # the shipped artifact: `build` stays CGO_ENABLED=0 for a static, reproducible binary.
 test:
 	CGO_ENABLED=1 go test -race ./...
+	cd $(PROTOCOL_MODULE) && CGO_ENABLED=1 go test -race ./...
 
 # Breaking-change gate against the committed baseline (main).
 breaking:

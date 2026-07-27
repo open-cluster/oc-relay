@@ -54,26 +54,23 @@ make test    # go test -race ./...
 ```
 
 The repository holds two Go modules: the Relay itself, and the generated contract under
-`gen/go`. Nested modules are not reached by `./...`, so the Makefile targets run each gate
-against both.
+`gen/go`. Nested modules are not reached by `./...`, so each Makefile target names both.
+`golangci-lint` is the documented exception; see the Makefile.
 
 ## Consuming the protocol
-
-Speak the protocol by importing the contract module at a pinned version:
 
 ```
 go get github.com/open-cluster/oc-relay/gen/go@v0.1.0
 ```
 
-It requires only gRPC and protobuf. The Relay's own module pulls in client-go and the
-Kubernetes libraries because it reads clusters; a consumer that merely speaks the protocol
-must not inherit that graph, and a build-failing gate keeps it out. Contract versions are
-tagged `gen/go/vX.Y.Z`.
+The contract module requires only gRPC and protobuf, and a build-failing gate keeps it
+that way. The Relay's own module carries client-go because it reads clusters; a consumer
+that merely speaks the protocol must not inherit that graph. Versions are tagged
+`gen/go/vX.Y.Z`.
 
-While this repository is private, a consumer needs `GOPRIVATE=github.com/open-cluster/*`
-so the module is fetched directly rather than through the public proxy and checksum
-database. `go.sum` still pins and verifies what was fetched; what is lost until the
-repository is public is the transparency log's independent cross-check.
+While this repository is private, consumers need `GOPRIVATE=github.com/open-cluster/*` and
+a credential with access. `go.sum` still pins and verifies what was fetched; only the
+checksum database's independent cross-check is unavailable until the repository is public.
 
 ## License
 
