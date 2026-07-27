@@ -12,7 +12,7 @@ module github.com/open-cluster/oc-relay/gen/go
 
 // Deliberately below the Relay module's own floor: the contract should be consumable by
 // anything that speaks it, so it requires only what the generated code actually needs.
-go 1.24
+go 1.25.0
 
 require (
 	google.golang.org/grpc v1.70.0
@@ -20,8 +20,8 @@ require (
 )
 
 require (
-	golang.org/x/net v0.32.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241202173237-19429a94021a // indirect
 )
