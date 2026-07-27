@@ -34,7 +34,8 @@ documentation.
 ## Repository layout
 
 - `proto/opencluster/relay/v1/` — the protocol source of truth (Buf-managed)
-- `gen/go/` — committed generated Go (drift-gated in CI)
+- `gen/go/` — committed generated Go (drift-gated in CI), and its own Go module so the
+  contract can be imported without this repository's Kubernetes dependencies
 - `docs/` — protocol and design documentation
 - `cmd/opencluster-relay/` — the composition root
 - `internal/` — identity, session runtime, read-only Kubernetes port, capabilities,
@@ -51,6 +52,28 @@ make gen     # regenerate gen/go (CI fails on uncommitted drift)
 make build   # go build ./...
 make test    # go test -race ./...
 ```
+
+The repository holds two Go modules: the Relay itself, and the generated contract under
+`gen/go`. Nested modules are not reached by `./...`, so the Makefile targets run each gate
+against both.
+
+## Consuming the protocol
+
+Speak the protocol by importing the contract module at a pinned version:
+
+```
+go get github.com/open-cluster/oc-relay/gen/go@v0.1.0
+```
+
+It requires only gRPC and protobuf. The Relay's own module pulls in client-go and the
+Kubernetes libraries because it reads clusters; a consumer that merely speaks the protocol
+must not inherit that graph, and a build-failing gate keeps it out. Contract versions are
+tagged `gen/go/vX.Y.Z`.
+
+While this repository is private, a consumer needs `GOPRIVATE=github.com/open-cluster/*`
+so the module is fetched directly rather than through the public proxy and checksum
+database. `go.sum` still pins and verifies what was fetched; what is lost until the
+repository is public is the transparency log's independent cross-check.
 
 ## License
 

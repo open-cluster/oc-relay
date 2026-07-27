@@ -45,15 +45,21 @@ jobs:
       - name: Tests (race detector)
         run: make test
 
+      # Both modules are scanned. The contract module is what other repositories import,
+      # so an advisory reaching it reaches every consumer of the protocol.
       - name: Vulnerability scan (govulncheck)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
+          cd gen/go && govulncheck ./...
 
       - name: Dependency license check (advisory pre-R1)
         run: |
           go install github.com/google/go-licenses@v1.6.0
           go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC,MPL-2.0 \
+            --ignore github.com/open-cluster/oc-relay || true
+          cd gen/go && go-licenses check ./... \
             --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC,MPL-2.0 \
             --ignore github.com/open-cluster/oc-relay || true
           # || true until first-party packages exist; flips to hard-fail with R1 code.

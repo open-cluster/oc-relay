@@ -7,6 +7,7 @@ module github.com/open-cluster/oc-relay
 go 1.26
 
 require (
+	github.com/open-cluster/oc-relay/gen/go v0.1.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/tools v0.26.0
 	google.golang.org/grpc v1.70.0
@@ -15,6 +16,12 @@ require (
 	k8s.io/apimachinery v0.32.0
 	k8s.io/client-go v0.32.0
 )
+
+// The protocol contract lives in this repository, so the Relay builds against the
+// working tree rather than a published version of itself. Consumers outside this
+// repository resolve the tagged module and are unaffected by this directive, which Go
+// ignores for anything that is not the main module.
+replace github.com/open-cluster/oc-relay/gen/go => ./gen/go
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect

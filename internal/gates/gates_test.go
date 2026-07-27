@@ -26,6 +26,10 @@ import (
 
 const modulePath = "github.com/open-cluster/oc-relay"
 
+// protocolModulePath is the generated contract, which is its own module so that a
+// consumer speaking the protocol does not inherit this one's Kubernetes dependencies.
+const protocolModulePath = modulePath + "/gen/go"
+
 // bannedImports can appear nowhere in the repository, tests included. Each entry is a
 // capability the Relay must not merely avoid but be UNABLE to acquire: process
 // spawning, dynamic code loading, raw syscall surfaces, and the write/exec-capable
@@ -41,11 +45,14 @@ var bannedImports = []string{
 
 func loadPackages(t *testing.T) []*packages.Package {
 	t.Helper()
+	// The generated contract sits in a nested module, so "./..." no longer reaches it.
+	// It is named explicitly rather than dropped: an import ban that stops covering
+	// part of the repository the moment that part moves is not a ban.
 	loaded, err := packages.Load(&packages.Config{
 		Mode:  packages.NeedName | packages.NeedImports | packages.NeedFiles,
 		Dir:   moduleRoot(t),
 		Tests: true,
-	}, "./...")
+	}, "./...", protocolModulePath+"/...")
 	if err != nil {
 		t.Fatalf("loading packages: %v", err)
 	}
@@ -113,6 +120,44 @@ func TestOnlyThePortAndCompositionRootTouchTheClientset(t *testing.T) {
 					"may construct or hold cluster clients", pkg.PkgPath, imported)
 			}
 		}
+	}
+}
+
+// TestTheProtocolModuleDoesNotReachKubernetes enforces the reason the contract is a
+// separate module at all. A control plane speaks the protocol without touching clusters,
+// so the generated types must not drag client-go and its transitive graph into every
+// consumer's dependency tree, vulnerability report and license inventory. The check walks
+// the whole transitive import graph rather than the module requirements, so an import
+// added before anyone runs `go mod tidy` still fails.
+func TestTheProtocolModuleDoesNotReachKubernetes(t *testing.T) {
+	loaded, err := packages.Load(&packages.Config{
+		Mode: packages.NeedName | packages.NeedImports | packages.NeedDeps,
+		Dir:  filepath.Join(moduleRoot(t), "gen", "go"),
+	}, "./...")
+	if err != nil {
+		t.Fatalf("loading the protocol module: %v", err)
+	}
+	if len(loaded) == 0 {
+		t.Fatal("no protocol packages loaded")
+	}
+
+	visited := make(map[string]bool)
+	var walk func(pkg *packages.Package)
+	walk = func(pkg *packages.Package) {
+		if visited[pkg.PkgPath] {
+			return
+		}
+		visited[pkg.PkgPath] = true
+		if strings.HasPrefix(pkg.PkgPath, "k8s.io/") {
+			t.Errorf("the protocol module reaches %s; the contract must stay "+
+				"consumable without the Kubernetes dependency graph", pkg.PkgPath)
+		}
+		for _, imported := range pkg.Imports {
+			walk(imported)
+		}
+	}
+	for _, pkg := range loaded {
+		walk(pkg)
 	}
 }
 

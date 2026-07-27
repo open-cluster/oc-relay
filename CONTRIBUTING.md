@@ -16,7 +16,9 @@ PR, not after.
 - Security-sensitive surfaces (capability code, the kube client port, identity,
   policy enforcement) require maintainer review regardless of size; the banned-API
   gates are not negotiable and `//nolint` on them is rejected.
-- No generated-code edits by hand; `make gen` owns `gen/go`.
+- No generated-code edits by hand; `make gen` owns the generated sources under `gen/go`.
+  Its `go.mod` and `go.sum` are the exception: they define the contract module and are
+  maintained by hand, so keep them to what the generated code actually needs.
 
 ## Commit style
 

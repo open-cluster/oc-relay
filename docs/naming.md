@@ -10,7 +10,7 @@ Surface 1 is now settled; the rest remain provisional and still rename together.
 
 | # | Surface | Value | Status |
 | --- | --- | --- | --- |
-| 1 | Go module path | `github.com/open-cluster/oc-relay` | SETTLED — matches the private repository created 2026-07-26 |
+| 1 | Go module path | `github.com/open-cluster/oc-relay`, and the nested contract module `github.com/open-cluster/oc-relay/gen/go` | SETTLED — matches the private repository created 2026-07-26 |
 | 2 | Protobuf package | `opencluster.relay.v1` — a wire/namespace contract | Provisional |
 | 3 | `csharp_namespace` | `OpenCluster.Relay.Protocol.V1` | Provisional |
 | 4 | Container image name | none published | Provisional |
@@ -37,6 +37,17 @@ Never ship a bare `relay` package, image, or repository name in any public artif
 ## Consumer impact of a module-path change
 
 `go_package` embeds the module path, so moving the module changes the generated descriptor
-set. Any consumer holding a pinned copy of `proto/` with a SHA-256 manifest and a committed
-descriptor baseline must re-synchronise all three atomically after such a move, even though
-the wire contract is unchanged.
+set even when the wire contract is untouched.
+
+Go consumers absorb that automatically: they import
+`github.com/open-cluster/oc-relay/gen/go` at a pinned version, so a move is an ordinary
+dependency update with `go.mod` recording what was taken and `go.sum` verifying it. The
+contract module deliberately sits at `gen/go` rather than the repository root, which keeps
+the import paths unchanged across the split and keeps the Kubernetes dependency graph out
+of anything that only speaks the protocol.
+
+A consumer that instead holds a hand-copied `proto/` tree with its own SHA-256 manifest and
+descriptor baseline has to re-synchronise all three atomically after such a move, and
+nothing tells it when to. The .NET reference implementation is the only consumer in that
+position; it is frozen, so its copy is left at the revision it was taken from rather than
+maintained. New consumers use the module.

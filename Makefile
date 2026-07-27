@@ -6,6 +6,13 @@ PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
 STATICCHECK_VERSION := 2025.1.1
 GOLANGCI_LINT_VERSION := v2.12.2
 
+# The generated contract is its own module so consumers can speak the protocol without
+# inheriting the Kubernetes dependency graph. Nested modules are not reached by "./...",
+# so every per-module gate below has to name it: a gate that stops covering part of the
+# repository the moment that part moves is worse than no gate, because it still reports
+# green.
+PROTOCOL_MODULE := gen/go
+
 .PHONY: tools lint gen gen-check build test breaking descriptor
 
 tools:
@@ -20,7 +27,9 @@ lint:
 	buf format --diff --exit-code
 	gofmt -l . | (! grep .)
 	go vet ./...
+	cd $(PROTOCOL_MODULE) && go vet ./...
 	staticcheck ./...
+	cd $(PROTOCOL_MODULE) && staticcheck ./...
 	golangci-lint run
 
 gen:
@@ -32,6 +41,7 @@ gen-check: gen
 
 build:
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false ./...
+	cd $(PROTOCOL_MODULE) && CGO_ENABLED=0 go build -trimpath -buildvcs=false ./...
 
 # The race detector requires cgo, so tests run with CGO_ENABLED=1. This is distinct from
 # the shipped artifact: `build` stays CGO_ENABLED=0 for a static, reproducible binary.
@@ -42,7 +52,7 @@ test:
 breaking:
 	buf breaking --against '.git#branch=main'
 
-# Descriptor set for the control-plane sync (copy + manifest + descriptor updated
-# atomically by the sync script on the consuming side).
+# Descriptor set: the committed baseline the schema-shape gate reads, and the artifact a
+# consumer generating for another language builds from.
 descriptor:
 	buf build -o gen/descriptor/opencluster-relay-v1.binpb
