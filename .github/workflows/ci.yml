@@ -35,9 +35,16 @@ jobs:
       - name: Generated-code drift gate
         run: make gen-check
 
+      # The checkout action fetches only the pull request's own ref, so the base branch is
+      # not in the local repository and buf cannot resolve it. Without the explicit fetch
+      # this gate fails to run at all rather than failing to find a breaking change, which
+      # is how it stayed unexercised until the first pull request.
       - name: Protobuf breaking-change gate
         if: github.event_name == 'pull_request'
-        run: buf breaking --against ".git#branch=${{ github.base_ref }}"
+        run: |
+          git fetch --no-tags origin \
+            "+refs/heads/${{ github.base_ref }}:refs/heads/${{ github.base_ref }}"
+          buf breaking --against ".git#branch=${{ github.base_ref }}"
 
       - name: Build (CGO disabled, trimpath)
         run: make build
