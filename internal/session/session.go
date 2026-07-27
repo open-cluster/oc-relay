@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // Executor runs one capability job to a typed result. Every source-side fault is a typed

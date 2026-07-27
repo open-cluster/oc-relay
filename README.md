@@ -14,9 +14,11 @@ capabilities compiled into the binary — returning bounded structured results.
 The Relay contains no model code, no AI reasoning, no incident state, no shell, no
 scripts, no dynamic plugins, and no generic remote-execution mechanism. Every
 capability is a compiled Go handler with a frozen Protobuf argument/result schema,
-enforced by build-failing gates rather than convention — the cgo-disabled build is
-wired today and the remaining banned-API gates land with the capability surfaces
-they guard, before any release.
+enforced by build-failing gates rather than convention: the cgo-disabled build, an
+import-graph and AST gate suite (no process spawning, no dynamic loading, no
+exec/port-forward surfaces, capability packages confined to the read-only Kubernetes
+port), a descriptor schema-shape gate that keeps dynamic payload types and
+command-like fields out of the protocol, and a pinned depguard/forbidigo lint layer.
 
 ## What data leaves the cluster
 
@@ -32,9 +34,12 @@ documentation.
 ## Repository layout
 
 - `proto/opencluster/relay/v1/` — the protocol source of truth (Buf-managed)
-- `gen/go/` — committed generated Go (drift-gated in CI)
+- `gen/go/` — committed generated Go (drift-gated in CI), and its own Go module so the
+  contract can be imported without this repository's Kubernetes dependencies
 - `docs/` — protocol and design documentation
-- Go implementation packages arrive with the first implementation slice (`cmd/`, `internal/`)
+- `cmd/opencluster-relay/` — the composition root
+- `internal/` — identity, session runtime, read-only Kubernetes port, capabilities,
+  configuration, pinned transport, and the local audit trail
 
 ## Development
 
@@ -47,6 +52,25 @@ make gen     # regenerate gen/go (CI fails on uncommitted drift)
 make build   # go build ./...
 make test    # go test -race ./...
 ```
+
+The repository holds two Go modules: the Relay itself, and the generated contract under
+`gen/go`. Nested modules are not reached by `./...`, so each Makefile target names both.
+`golangci-lint` is the documented exception; see the Makefile.
+
+## Consuming the protocol
+
+```
+go get github.com/open-cluster/oc-relay/gen/go@v0.1.0
+```
+
+The contract module requires only gRPC and protobuf, and a build-failing gate keeps it
+that way. The Relay's own module carries client-go because it reads clusters; a consumer
+that merely speaks the protocol must not inherit that graph. Versions are tagged
+`gen/go/vX.Y.Z`.
+
+While this repository is private, consumers need `GOPRIVATE=github.com/open-cluster/*` and
+a credential with access. `go.sum` still pins and verifies what was fetched; only the
+checksum database's independent cross-check is unavailable until the repository is public.
 
 ## License
 

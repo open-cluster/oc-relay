@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 func jobResult(jobID string, epoch uint64) *relayv1.JobResult {

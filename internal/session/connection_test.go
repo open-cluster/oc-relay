@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 // fakeStream is a programmable bidi stream: the test feeds control-plane messages on

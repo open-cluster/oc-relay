@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	relayv1 "github.com/OCluster/opencluster-relay/gen/go/opencluster/relay/v1"
+	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
 func isShed(m *relayv1.RelayToControl) bool {
