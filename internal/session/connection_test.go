@@ -58,11 +58,17 @@ func (f *fakeStream) assign(jobID string, epoch uint64) {
 }
 
 func (f *fakeStream) assignWith(jobID string, epoch uint64, org, registration string) {
+	f.assignCapability(jobID, epoch, org, registration, "kubernetes.workload.runtime", 1)
+}
+
+func (f *fakeStream) assignCapability(
+	jobID string, epoch uint64, org, registration, capability string, version uint32,
+) {
 	f.incoming <- &relayv1.ControlToRelay{
 		Message: &relayv1.ControlToRelay_JobAssignment{
 			JobAssignment: &relayv1.JobAssignment{
 				JobId: jobID, OrgId: org, RegistrationId: registration, LeaseEpoch: epoch,
-				CapabilityId: "kubernetes.workload.runtime", CapabilityVersion: 1,
+				CapabilityId: capability, CapabilityVersion: version,
 			},
 		},
 	}
