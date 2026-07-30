@@ -67,6 +67,51 @@ func TestConnection_RefusesAssignmentWithIdentityMismatch(t *testing.T) {
 	}
 }
 
+// An assignment naming a capability this relay did not compile in — or the right capability
+// at a version it did not compile — is refused with KIND_UNSUPPORTED_CAPABILITY_VERSION and
+// never executed.
+//
+// The version half is the one that matters and the one that is easy to get wrong, because
+// today there is one capability at one version and dispatching by id alone looks correct. It
+// stops looking correct the day a v2 exists: schema versions are frozen, so a v2 means
+// different semantics, and a relay that runs a v2 job through its v1 implementation returns
+// an answer under the wrong contract with nothing downstream able to tell. Refusing is what
+// turns "this relay is too old" into something the control plane learns.
+func TestConnection_RefusesACapabilityItDoesNotHave(t *testing.T) {
+	cases := []struct {
+		name       string
+		capability string
+		version    uint32
+	}{
+		{name: "a version it did not compile", capability: "kubernetes.workload.runtime", version: 2},
+		{name: "a capability it does not have", capability: "aws.ec2.runtime", version: 1},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := newFakeStream(ctx)
+			exec := &countingExecutor{}
+			s := testSession(exec)
+			go func() { _ = s.runConnection(ctx, cancel, stream, nil) }()
+
+			_ = stream.nextFrom(t) // hello
+			stream.accept("session-1")
+			stream.assignCapability("job-x", 1, "org-a", "7", testCase.capability, testCase.version)
+
+			result := stream.nextFrom(t).GetJobResult()
+			if result.GetFailure().GetKind() !=
+				relayv1.JobFailure_KIND_UNSUPPORTED_CAPABILITY_VERSION {
+				t.Fatalf("refusal must report KIND_UNSUPPORTED_CAPABILITY_VERSION, got %+v", result)
+			}
+			if exec.calls.Load() != 0 {
+				t.Fatal("an unsupported assignment must never reach the executor")
+			}
+		})
+	}
+}
+
 // A redelivered assignment (sweep / on-connect catch-up) is re-acked but never executed a
 // second time.
 func TestConnection_DuplicateAssignmentIsNotReexecuted(t *testing.T) {

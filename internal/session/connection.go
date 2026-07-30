@@ -257,6 +257,26 @@ func (s *Session) dispatchAssignment(
 		return
 	}
 
+	// The assignment must name something this relay compiled in, at the version it compiled.
+	// Executing whatever is to hand and reporting the result under the assignment's version
+	// would be the worst available answer: schema versions are frozen, so a version this relay
+	// does not have means semantics it does not implement, and an answer produced under the
+	// wrong contract is indistinguishable downstream from one produced under the right one.
+	//
+	// Like an identity mismatch this is refused before any capacity is reserved and reported
+	// best-effort rather than retained. Nothing was executed, so there is no result to keep.
+	//
+	// That is a deliberate divergence from what session.proto says about JobResult — that the
+	// relay retains a result and resends it until a definitive ResultAck. Retaining this one
+	// would mean holding a slot for it, and a control plane dispatching work no relay in the
+	// fleet supports would then consume the whole fleet's capacity with refusals it is
+	// already ignoring. The cost of not retaining is that a lost refusal waits out the lease
+	// instead of ending the job promptly, which is slow rather than wrong.
+	if !s.supportsAssignment(job) {
+		_ = sender.enqueue(ctx, resultMessage(unsupportedCapability(jobID, epoch)))
+		return
+	}
+
 	// Admission: reserve one unit of outstanding-work capacity. At capacity the relay
 	// sheds (leaving the job leased for the control plane to recover); the non-blocking
 	// acquire keeps the receive loop responsive to acks, cancellations, and drain.
@@ -381,6 +401,33 @@ func identityMismatch(jobID string, epoch uint64) *relayv1.JobResult {
 		JobId: jobID, LeaseEpoch: epoch,
 		Outcome: &relayv1.JobResult_Failure{
 			Failure: &relayv1.JobFailure{Kind: relayv1.JobFailure_KIND_IDENTITY_MISMATCH},
+		},
+	}
+}
+
+// supportsAssignment reports whether the assignment names a capability this relay advertised,
+// at the version it advertised. The declared set is the same one the hello carries, so what
+// the relay refuses is exactly what it never claimed — there is no second list to drift.
+func (s *Session) supportsAssignment(job *relayv1.JobAssignment) bool {
+	for _, declared := range s.config.Capabilities {
+		if declared.GetCapabilityId() == job.GetCapabilityId() &&
+			declared.GetCapabilityVersion() == job.GetCapabilityVersion() {
+			return true
+		}
+	}
+	return false
+}
+
+// unsupportedCapability is the typed refusal of an assignment this relay cannot run. One kind
+// covers an unknown capability and a known one at an unknown version, because the operator
+// action is the same for both: this relay is not the build that can do this.
+func unsupportedCapability(jobID string, epoch uint64) *relayv1.JobResult {
+	return &relayv1.JobResult{
+		JobId: jobID, LeaseEpoch: epoch,
+		Outcome: &relayv1.JobResult_Failure{
+			Failure: &relayv1.JobFailure{
+				Kind: relayv1.JobFailure_KIND_UNSUPPORTED_CAPABILITY_VERSION,
+			},
 		},
 	}
 }
