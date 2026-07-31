@@ -206,6 +206,11 @@ func namespaces(lookup func(string) (string, bool), key string) (map[string]bool
 		if namespace == "" {
 			continue
 		}
+		// Checked before the entry is added, not after the whole list is built. A bound
+		// enforced once the allocation has already happened is not a bound.
+		if len(allowed) >= maxAllowedNamespaces {
+			return nil, fmt.Errorf("%s: at most %d namespaces", key, maxAllowedNamespaces)
+		}
 		if !dns1123Label.MatchString(namespace) || len(namespace) > 63 {
 			return nil, fmt.Errorf("%s: %q is not a Kubernetes namespace", key, namespace)
 		}
@@ -213,9 +218,6 @@ func namespaces(lookup func(string) (string, bool), key string) (map[string]bool
 	}
 	if len(allowed) == 0 {
 		return nil, fmt.Errorf("%s: no usable namespaces", key)
-	}
-	if len(allowed) > maxAllowedNamespaces {
-		return nil, fmt.Errorf("%s: at most %d namespaces", key, maxAllowedNamespaces)
 	}
 	return allowed, nil
 }

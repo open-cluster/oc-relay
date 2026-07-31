@@ -84,7 +84,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	// The read-only cluster client serves the workload capability and reads the cluster
+	// The read-only cluster client serves every capability and reads the cluster
 	// fingerprint the session Hello carries (and enrollment attests).
 	reader, err := newWorkloadReader(cfg)
 	if err != nil {
@@ -95,12 +95,19 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("reading cluster fingerprint: %w", err)
 	}
 
+	// Built before enrolment, because enrolment ATTESTS the same set the session advertises.
+	// Two lists would be two lists to drift, and the drift is silent in the worst way: the
+	// control plane would record at enrolment that this Relay serves one capability while the
+	// session says it serves three, and an operator reading the roster would believe the
+	// registration.
+	registry := compiledCapabilities(reader, cfg)
+
 	if needEnroll {
 		if cfg.BootstrapTokenFile == "" {
 			return fmt.Errorf(
 				"%w and RELAY_BOOTSTRAP_TOKEN_FILE is not set", identity.ErrBootstrapRequired)
 		}
-		credential, err = enroll(ctx, cfg, fingerprint, store, logger)
+		credential, err = enroll(ctx, cfg, fingerprint, registry.Descriptors(), store, logger)
 		if err != nil {
 			return err
 		}
@@ -122,7 +129,6 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	registry := compiledCapabilities(reader, cfg)
 	executor := audit.NewExecutor(registry, logger)
 	relaySession := session.New(session.Config{
 		OrgID:              credential.OrgID,
@@ -154,7 +160,10 @@ func compiledCapabilities(reader *kube.Reader, cfg config.Config) *capabilities.
 	policy := capabilities.LocalPolicy{AllowedNamespaces: cfg.AllowedNamespaces}
 
 	registry := capabilities.NewRegistry()
-	registry.Register(runtime.Descriptor(), runtime.NewExecutor(reader, cfg.LocalMaxPods))
+	registry.Register(runtime.Descriptor(), runtime.NewExecutor(reader, runtime.Options{
+		Policy:       policy,
+		LocalMaxPods: cfg.LocalMaxPods,
+	}))
 	registry.Register(events.Descriptor(), events.NewExecutor(reader, events.Options{
 		Policy:           policy,
 		LocalMaxEvents:   cfg.LocalMaxEvents,
@@ -211,7 +220,7 @@ func clusterFingerprint(ctx context.Context, reader *kube.Reader) (string, error
 // Relay never re-enrolls (see run).
 func enroll(
 	ctx context.Context, cfg config.Config, fingerprint string,
-	store identity.Store, logger *slog.Logger,
+	capabilities []*relayv1.CapabilityDescriptor, store identity.Store, logger *slog.Logger,
 ) (identity.Credential, error) {
 	token, err := readBootstrapToken(cfg.BootstrapTokenFile)
 	if err != nil {
@@ -238,7 +247,7 @@ func enroll(
 			ProtocolVersion:    protocolVersion,
 			RelayVersion:       version,
 			ClusterFingerprint: fingerprint,
-			Capabilities:       []*relayv1.CapabilityDescriptor{runtime.Descriptor()},
+			Capabilities:       capabilities,
 		}, store)
 	if err != nil {
 		return identity.Credential{}, err

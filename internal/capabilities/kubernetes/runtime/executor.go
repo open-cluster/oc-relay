@@ -28,15 +28,22 @@ const (
 // a deadline budget measured from receipt — a budget expiry is a timeout, a caller
 // cancellation is a cancellation, and the two are never confused.
 type Executor struct {
-	reader       kube.WorkloadReader
-	localMaxPods int64
+	reader  kube.WorkloadReader
+	options Options
 }
 
-// NewExecutor builds the capability executor. localMaxPods is the customer-authored local
-// cap; the effective page size is min(dispatched max_pods, localMaxPods), clamped to
-// [MinWorkloadPods, MaxWorkloadPods].
-func NewExecutor(reader kube.WorkloadReader, localMaxPods int64) *Executor {
-	return &Executor{reader: reader, localMaxPods: localMaxPods}
+// Options is the executor's customer-authored configuration. Every field may narrow a read
+// and none may widen one.
+type Options struct {
+	// Policy may refuse a namespace outright.
+	Policy capabilities.LocalPolicy
+	// LocalMaxPods lowers the pod bound. Zero means the operator set none.
+	LocalMaxPods int64
+}
+
+// NewExecutor builds the capability executor.
+func NewExecutor(reader kube.WorkloadReader, options Options) *Executor {
+	return &Executor{reader: reader, options: options}
 }
 
 // Execute runs one workload-runtime job to a typed result. The deadline budget and the
@@ -46,6 +53,12 @@ func (e *Executor) Execute(ctx context.Context, job *relayv1.JobAssignment) *rel
 	args := job.GetArguments().GetKubernetesWorkloadRuntimeV1()
 	if !validArgs(args) {
 		return capabilities.Failure(job, relayv1.JobFailure_KIND_ARGUMENTS_REJECTED)
+	}
+	// A namespace the operator excluded is excluded from EVERY read. A guarantee that held
+	// for two capabilities and not the third would be worse than none, because an operator
+	// would believe it held for all.
+	if !e.options.Policy.AllowsNamespace(args.GetNamespace()) {
+		return capabilities.Failure(job, relayv1.JobFailure_KIND_LOCAL_POLICY_REFUSED)
 	}
 
 	return capabilities.Run(ctx, job, func(execCtx context.Context) capabilities.Reading {
@@ -143,7 +156,7 @@ func (e *Executor) fetchWorkload(ctx context.Context, args *relayv1.KubernetesWo
 }
 
 func (e *Executor) effectiveMaxPods(dispatched uint32) int64 {
-	return capabilities.Lower(dispatched, e.localMaxPods, MinWorkloadPods, MaxWorkloadPods)
+	return capabilities.Lower(dispatched, e.options.LocalMaxPods, MinWorkloadPods, MaxWorkloadPods)
 }
 
 func validArgs(args *relayv1.KubernetesWorkloadRuntimeArgsV1) bool {

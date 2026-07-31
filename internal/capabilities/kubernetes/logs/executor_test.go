@@ -300,6 +300,66 @@ func TestExecutor_OneLineLongerThanTheByteBoundIsTruncatedByBytes(t *testing.T) 
 		t.Fatalf("more bytes left the cluster than the bound allowed: %d",
 			result.GetReturnedByteCount())
 	}
+	// Zero lines, deliberately: the newest line is the one that explains a failure, and
+	// skipping it to fit the older one in would answer a different question while looking
+	// like it answered this one. The flag beside it says nothing fitted.
+	if result.GetReturnedLineCount() != 0 {
+		t.Fatalf("a newest line that cannot fit must stop the read rather than being skipped "+
+			"in favour of older ones; got %d lines", result.GetReturnedLineCount())
+	}
+	if result.GetWithheldByteCount() == 0 {
+		t.Fatal("a read that returned nothing must say how much it saw and withheld")
+	}
+}
+
+// The bytes reported are the bytes emitted. A count taken before per-line capping would
+// overstate what left the cluster, and a completeness basis that overstates is worse than one
+// that says nothing.
+func TestExecutor_ReturnedBytesDescribeWhatWasActuallyEmitted(t *testing.T) {
+	reader := &fakeReader{
+		pod:  pod("api", false),
+		read: &kube.LogRead{Raw: stamped(strings.Repeat("z", capabilities.MaxLogLineChars*2))},
+	}
+
+	result := logsResult(t, newExecutor(reader).Execute(context.Background(),
+		job("shop", "checkout-7f", "api", false, 100, 262144)))
+
+	var emitted int64
+	for _, line := range result.GetLines() {
+		emitted += int64(len(line.GetContent()))
+	}
+	if result.GetReturnedByteCount() != emitted {
+		t.Fatalf("returned_byte_count is %d but %d bytes were emitted",
+			result.GetReturnedByteCount(), emitted)
+	}
+}
+
+// Both bounds can bind at once, and both flags must say so independently. A result reporting
+// only one would leave a reader believing the other bound had room.
+func TestExecutor_ALogOverBothBoundsReportsBothOfThem(t *testing.T) {
+	lines := make([]string, 0, 40)
+	for range 40 {
+		lines = append(lines, strings.Repeat("w", 500))
+	}
+	reader := &fakeReader{pod: pod("api", false), read: &kube.LogRead{Raw: stamped(lines...)}}
+
+	// Twenty lines allowed of forty sent, and 4096 bytes allowed of twenty thousand.
+	result := logsResult(t, newExecutor(reader).Execute(context.Background(),
+		job("shop", "checkout-7f", "api", false, 20, 4096)))
+
+	if !result.GetTruncatedByLineBound() || !result.GetTruncatedByByteBound() {
+		t.Fatalf("both bounds bound and both must be reported: lines=%v bytes=%v",
+			result.GetTruncatedByLineBound(), result.GetTruncatedByByteBound())
+	}
+	if result.GetComplete() {
+		t.Fatal("a read bound by either limit is not complete")
+	}
+	if result.GetReturnedByteCount() > 4096 {
+		t.Fatalf("more bytes left the cluster than allowed: %d", result.GetReturnedByteCount())
+	}
+	if result.GetReturnedLineCount() > 20 {
+		t.Fatalf("more lines left the cluster than allowed: %d", result.GetReturnedLineCount())
+	}
 }
 
 func TestExecutor_AFetchThatHitTheReadCeilingIsIncompleteAndDropsThePartialLine(t *testing.T) {

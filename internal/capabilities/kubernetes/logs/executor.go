@@ -249,6 +249,11 @@ func parseLines(read *kube.LogRead) []line {
 			continue
 		}
 		at, content := splitTimestamp(entry)
+		// Capped HERE, before anything is counted, so the byte accounting describes what
+		// actually leaves the cluster. Capping at emission and counting the raw length would
+		// report more bytes than were sent, and a completeness basis that overstates what it
+		// returned is worse than one that says nothing.
+		content = capabilities.CapLogLine(content)
 		parsed = append(parsed, line{at: at, content: content, bytes: int64(len(content))})
 	}
 	return parsed
@@ -301,7 +306,15 @@ func applyBounds(parsed []line, fetchTruncated bool, lineBound, byteBound int64)
 		}
 	}
 
-	// Walk backwards from the newest, taking lines while they fit.
+	// Walk backwards from the newest, taking lines while they fit, and STOP at the first that
+	// does not — rather than skipping it to fit older ones in.
+	//
+	// Stopping is the honest choice and it is deliberate. The bounds mean "the most recent
+	// output that fits", and an investigator reading this is reading what the container said
+	// last. Skipping an oversized newest line to return three older ones would answer a
+	// different question while looking like it answered this one. When the newest line alone
+	// exceeds the bound the result is zero lines with the byte-bound flag set, which says
+	// plainly that nothing fitted rather than quietly showing the wrong thing.
 	var total int64
 	first := len(keep)
 	for index := len(keep) - 1; index >= 0; index-- {
@@ -320,11 +333,7 @@ func applyBounds(parsed []line, fetchTruncated bool, lineBound, byteBound int64)
 	bounded.returnedBytes = total
 	bounded.lines = make([]*relayv1.KubernetesLogLine, 0, len(kept))
 	for _, entry := range kept {
-		emitted := &relayv1.KubernetesLogLine{
-			// Capped independently of the byte bound. The byte bound stops many lines from
-			// being too much; this stops one line from being all of it.
-			Content: capabilities.CapLogLine(entry.content),
-		}
+		emitted := &relayv1.KubernetesLogLine{Content: entry.content}
 		if !entry.at.IsZero() {
 			emitted.At = timestamppb.New(entry.at)
 		}
