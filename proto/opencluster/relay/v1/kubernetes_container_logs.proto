@@ -1,0 +1,108 @@
+// OpenCluster Relay protocol v1 — kubernetes.container.logs capability, schema
+// version 1.
+//
+// This message set is FROZEN: any semantic change mints kubernetes.container.logs v2
+// messages. It answers one question — what did this container say — and it is bounded in
+// lines, in bytes, and in time. There is no follow, stream, or tail-forever mode, and the
+// absence of one is STRUCTURAL and permanent: a read that could be held open is a channel
+// out of the cluster, which is the thing the capability model exists to prevent. There is
+// no content filter, no pattern and no expression, because a content filter is a query
+// language and a query language is the generic surface a closed registry refuses to grow.
+//
+// Log CONTENT is the largest untrusted surface in the product on two independent axes. It
+// is written by software an attacker may control and read by a model, so it is UNTRUSTED
+// for its whole life and can never become an instruction. It is also where applications
+// print secrets they never meant to print, which is why Relay-side redaction gates the use
+// of this capability against any cluster holding real data — synthetic scenario clusters
+// only until that exists.
+//
+// All timestamps are source-observed values and are PROVENANCE ONLY — they never enter any
+// server-side fence, expiry, or dedup comparison. A container's clock is not this
+// platform's clock and must never be allowed to act like it.
+
+syntax = "proto3";
+
+package opencluster.relay.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+option go_package = "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1;relayv1";
+
+message KubernetesContainerLogsArgsV1 {
+  // DNS-1123 label, max 63 chars.
+  string namespace = 1;
+  // DNS-1123 subdomain, max 253 chars.
+  string pod_name = 2;
+  // The container within that pod. Required: a pod's containers are not
+  // interchangeable, and defaulting to the first one reads whichever the spec happens
+  // to list first.
+  string container_name = 3;
+  // Read the PREVIOUS terminated instance rather than the running one. Deliberately an
+  // argument and never an inference: the container that died is the one that explains
+  // the failure and the container that replaced it is usually silent, so which was read
+  // has to be visible in the record rather than decided by a heuristic.
+  bool previous = 4;
+  // Line bound. Applied together with the byte bound; whichever binds first wins, and
+  // both effective values are reported.
+  uint32 max_lines = 5;
+  // Byte bound. A line cap alone is defeated by one very long line, so this exists and
+  // is enforced independently. Local caps may lower both and never raise them.
+  uint32 max_bytes = 6;
+  // Optional. Absent reads from as far back as the bounds allow.
+  google.protobuf.Timestamp since_time = 7;
+}
+
+// Read outcome taxonomy for this capability. Every value is reachable. An unauthorized
+// read is NEVER reported as empty: conflating the two is how an RBAC misconfiguration
+// becomes a certified negative, which is the worst outcome the truth model can produce.
+enum KubernetesLogsOutcome {
+  KUBERNETES_LOGS_OUTCOME_UNSPECIFIED = 0;
+  KUBERNETES_LOGS_OUTCOME_SUCCESS = 1;
+  KUBERNETES_LOGS_OUTCOME_UNREACHABLE = 2;
+  KUBERNETES_LOGS_OUTCOME_UNAUTHORIZED = 3;
+  KUBERNETES_LOGS_OUTCOME_POD_NOT_FOUND = 4;
+  KUBERNETES_LOGS_OUTCOME_CONTAINER_NOT_FOUND = 5;
+  // The container exists and has no previous instance — it has never restarted. Kept
+  // apart from CONTAINER_NOT_FOUND because the two send an investigator to opposite
+  // conclusions: one is a wrong name, the other is a container that never died.
+  KUBERNETES_LOGS_OUTCOME_PREVIOUS_CONTAINER_NOT_FOUND = 6;
+}
+
+message KubernetesLogLine {
+  // Source-observed emission time; provenance only. Absent when the container wrote a
+  // line the RFC3339 prefix could not be read from, which is reported as an absent
+  // timestamp rather than as this Relay's clock.
+  google.protobuf.Timestamp at = 1;
+  // One line as the container wrote it, with its timestamp prefix removed. UNTRUSTED.
+  string content = 2;
+}
+
+message KubernetesContainerLogsResultV1 {
+  KubernetesLogsOutcome outcome = 1;
+  // Present only on SUCCESS, ordered oldest first. The bounds are applied from the END
+  // of the log, so what is returned is the most recent output that fits — a failure is
+  // explained by what was said last, not by what was said first.
+  repeated KubernetesLogLine lines = 2;
+  // Completeness basis the central certificate consumes — must arrive intact.
+  int32 returned_line_count = 3;
+  int64 returned_byte_count = 4;
+  // True iff the read reached the beginning of the available log without either bound
+  // binding. A truncated read can never mint a certified absence: a bound is not a fact
+  // about the workload.
+  bool complete = 5;
+  // Which bound bound, so a customer's local cap is visible as a coverage gap rather
+  // than invisible in a config file. Both may be true.
+  bool truncated_by_line_bound = 6;
+  bool truncated_by_byte_bound = 7;
+  // Bytes of the lines this read obtained and then dropped to stay inside the effective
+  // bounds. It is what this Relay saw and withheld, NOT an estimate of the rest of the
+  // log: the Kubernetes API does not report how much it did not send, and a number
+  // invented here would be read as a measurement. Zero on a complete read.
+  int64 withheld_byte_count = 8;
+  // Source-observed read time; provenance only.
+  google.protobuf.Timestamp read_at = 9;
+  // Effective bounds applied (dispatch bounds possibly lowered by local caps).
+  uint32 applied_max_lines = 10;
+  uint32 applied_max_bytes = 11;
+}

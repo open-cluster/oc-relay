@@ -25,6 +25,9 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/open-cluster/oc-relay/internal/audit"
+	"github.com/open-cluster/oc-relay/internal/capabilities"
+	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/events"
+	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/logs"
 	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/runtime"
 	"github.com/open-cluster/oc-relay/internal/config"
 	"github.com/open-cluster/oc-relay/internal/identity"
@@ -119,11 +122,12 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	executor := audit.NewExecutor(runtime.NewExecutor(reader, cfg.LocalMaxPods), logger)
+	registry := compiledCapabilities(reader, cfg)
+	executor := audit.NewExecutor(registry, logger)
 	relaySession := session.New(session.Config{
 		OrgID:              credential.OrgID,
 		RegistrationID:     credential.RegistrationID,
-		Capabilities:       []*relayv1.CapabilityDescriptor{runtime.Descriptor()},
+		Capabilities:       registry.Descriptors(),
 		MaxConcurrentJobs:  cfg.MaxConcurrentJobs,
 		RelayVersion:       version,
 		ClusterFingerprint: fingerprint,
@@ -137,6 +141,31 @@ func run(logger *slog.Logger) error {
 		slog.String("relay_version", version))
 	client := relayv1.NewRelaySessionServiceClient(connection)
 	return relaySession.Run(ctx, session.NewGRPCConnector(client, credential))
+}
+
+// compiledCapabilities is the closed set this build can execute, and the same set it
+// advertises. One registry serves both, so what the Relay refuses is exactly what it never
+// claimed — there is no second list for the two to drift apart in.
+//
+// Every capability is handed the same customer-authored local policy. A namespace an
+// operator excluded is excluded from every read, not from whichever ones remembered to
+// check, which is the only form of that guarantee worth stating to them.
+func compiledCapabilities(reader *kube.Reader, cfg config.Config) *capabilities.Registry {
+	policy := capabilities.LocalPolicy{AllowedNamespaces: cfg.AllowedNamespaces}
+
+	registry := capabilities.NewRegistry()
+	registry.Register(runtime.Descriptor(), runtime.NewExecutor(reader, cfg.LocalMaxPods))
+	registry.Register(events.Descriptor(), events.NewExecutor(reader, events.Options{
+		Policy:           policy,
+		LocalMaxEvents:   cfg.LocalMaxEvents,
+		RetentionHorizon: cfg.EventRetention,
+	}))
+	registry.Register(logs.Descriptor(), logs.NewExecutor(reader, logs.Options{
+		Policy:        policy,
+		LocalMaxLines: cfg.LocalMaxLogLines,
+		LocalMaxBytes: cfg.LocalMaxLogBytes,
+	}))
+	return registry
 }
 
 // newWorkloadReader builds the read-only Kubernetes boundary. In-cluster

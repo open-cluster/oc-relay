@@ -8,6 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/open-cluster/oc-relay/internal/capabilities"
 )
 
 // These tests pin the per-kind replica-counter contract. The sharp point:
@@ -183,10 +185,10 @@ func TestMapDeploymentSummary_UnrepresentableSelectorIsEmpty(t *testing.T) {
 }
 
 func TestCapQuantity_Bounds(t *testing.T) {
-	if got := capQuantity(strings.Repeat("9", 64)); len(got) != 32 {
+	if got := capabilities.CapQuantity(strings.Repeat("9", 64)); len(got) != 32 {
 		t.Fatalf("quantity must cap at 32, got len %d", len(got))
 	}
-	if got := capQuantity("500m"); got != "500m" {
+	if got := capabilities.CapQuantity("500m"); got != "500m" {
 		t.Fatalf("under-cap quantity must pass through, got %q", got)
 	}
 }

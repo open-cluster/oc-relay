@@ -22,6 +22,8 @@ syntax = "proto3";
 package opencluster.relay.v1;
 
 import "google/protobuf/duration.proto";
+import "opencluster/relay/v1/kubernetes_container_logs.proto";
+import "opencluster/relay/v1/kubernetes_namespace_events.proto";
 import "opencluster/relay/v1/kubernetes_workload_runtime.proto";
 import "opencluster/relay/v1/registration.proto";
 
@@ -36,12 +38,16 @@ option go_package = "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v
 message CapabilityArguments {
   oneof arguments {
     KubernetesWorkloadRuntimeArgsV1 kubernetes_workload_runtime_v1 = 10;
+    KubernetesNamespaceEventsArgsV1 kubernetes_namespace_events_v1 = 11;
+    KubernetesContainerLogsArgsV1 kubernetes_container_logs_v1 = 12;
   }
 }
 
 message CapabilityResult {
   oneof result {
     KubernetesWorkloadRuntimeResultV1 kubernetes_workload_runtime_v1 = 10;
+    KubernetesNamespaceEventsResultV1 kubernetes_namespace_events_v1 = 11;
+    KubernetesContainerLogsResultV1 kubernetes_container_logs_v1 = 12;
   }
 }
 

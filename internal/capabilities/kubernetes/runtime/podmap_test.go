@@ -9,6 +9,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/open-cluster/oc-relay/internal/capabilities"
+
 	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
@@ -270,14 +272,14 @@ func TestMapPod_ContainerPassthroughFields(t *testing.T) {
 // surrogate or a torn UTF-8 sequence.
 func TestCapChars_NonBMPInput(t *testing.T) {
 	astral := strings.Repeat("\U0001D51E", 300)
-	capped := capIdentifier(astral)
+	capped := capabilities.CapIdentifier(astral)
 	if got := utf8.RuneCountInString(capped); got != 253 {
 		t.Fatalf("astral identifier must cap at 253 runes, got %d", got)
 	}
 	if !utf8.ValidString(capped) {
 		t.Fatalf("capped string must remain valid UTF-8")
 	}
-	if under := strings.Repeat("\U0001D51E", 100); capIdentifier(under) != under {
+	if under := strings.Repeat("\U0001D51E", 100); capabilities.CapIdentifier(under) != under {
 		t.Fatalf("under-cap non-BMP string must pass through unchanged")
 	}
 }

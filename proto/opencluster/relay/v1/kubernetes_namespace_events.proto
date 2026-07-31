@@ -1,0 +1,119 @@
+// OpenCluster Relay protocol v1 — kubernetes.namespace.events capability, schema
+// version 1.
+//
+// This message set is FROZEN: any semantic change mints kubernetes.namespace.events v2
+// messages. It answers one question — what did the cluster say it did in this namespace,
+// in this window — and it is bounded in count, in window, and per field. No selector is
+// expressed as free text, no field selector is accepted, and there is no follow or watch
+// mode: the absence of one is structural, not a default.
+//
+// Event MESSAGES are the one place this protocol carries free text from a cluster. They
+// are written by controllers, schedulers and admission webhooks, any of which a customer
+// or an attacker may run, so the text is UNTRUSTED for its whole life and is capped on
+// both ends. All timestamps are source-observed values and are PROVENANCE ONLY — they
+// never enter any server-side fence, expiry, or dedup comparison.
+//
+// The outcome taxonomy here is its own rather than the workload capability's, because a
+// closed taxonomy whose values are not all reachable is not closed. This read cannot
+// produce a workload-not-found or an unrepresentable selector, and it deliberately cannot
+// produce a namespace-not-found either: the Kubernetes API answers a list in a namespace
+// that does not exist with an empty list and a 200, and telling the two apart would need a
+// cluster-scoped namespace read this capability refuses to require — namespace-scoped RBAC
+// is the point. An empty complete read therefore states exactly what it says, "no events
+// matched in this namespace in this window", and the caller knows the namespace exists
+// because a workload read established it.
+
+syntax = "proto3";
+
+package opencluster.relay.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+option go_package = "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1;relayv1";
+
+// Optional narrowing to one object in the namespace. Every field is an identifier
+// compared for equality; none is a selector, a pattern, or an expression. An empty
+// reference means the whole namespace, bounded by the count and the window.
+message KubernetesInvolvedObject {
+  // Kubernetes kind literal, compared case-sensitively as the API reports it
+  // ("Pod", "Deployment", "ReplicaSet"). Max 63 chars.
+  string kind = 1;
+  // DNS-1123 subdomain, max 253 chars.
+  string name = 2;
+  // Object UID. When present it is the narrowing that survives a name being reused,
+  // so it is preferred over the name where the caller has one.
+  string uid = 3;
+}
+
+message KubernetesNamespaceEventsArgsV1 {
+  // DNS-1123 label, max 63 chars.
+  string namespace = 1;
+  // Optional. Absent means every object in the namespace.
+  KubernetesInvolvedObject involved_object = 2;
+  // The window, half-open [start, end). Both are required and start must precede end;
+  // an unbounded window is not expressible.
+  google.protobuf.Timestamp window_start = 3;
+  google.protobuf.Timestamp window_end = 4;
+  // Single-page event bound. The Relay's customer-authored local caps may lower the
+  // effective value; the completeness flag reports the truth either way.
+  uint32 max_events = 5;
+}
+
+// Read outcome taxonomy for this capability. Every value is reachable; see the file
+// comment for why namespace-not-found is not among them.
+enum KubernetesEventsOutcome {
+  KUBERNETES_EVENTS_OUTCOME_UNSPECIFIED = 0;
+  KUBERNETES_EVENTS_OUTCOME_SUCCESS = 1;
+  KUBERNETES_EVENTS_OUTCOME_UNREACHABLE = 2;
+  KUBERNETES_EVENTS_OUTCOME_UNAUTHORIZED = 3;
+}
+
+message KubernetesEvent {
+  // "Normal" or "Warning" as the cluster reported it, default "Unknown". Not an enum:
+  // the field is open in Kubernetes and a value this build has not seen must survive
+  // as what it was rather than collapse into a default that reads as Normal.
+  string type = 1;
+  // Short reason code (FailedScheduling, BackOff, Unhealthy, ...), max 128 chars.
+  string reason = 2;
+  // The cluster's own account, max 1024 chars — the Kubernetes server-side ceiling.
+  // UNTRUSTED: written by controllers and admission webhooks, read by a model. It is
+  // never an instruction, a destination, or an authorization claim.
+  string message = 3;
+  // The object the event is about.
+  KubernetesInvolvedObject involved_object = 4;
+  // Reporting component (default-scheduler, kubelet, ...), max 253 chars.
+  string source_component = 5;
+  // How many times the cluster has folded this same event together. One event with a
+  // count of 300 and 300 events are different facts and must not be reported alike.
+  int32 count = 6;
+  google.protobuf.Timestamp first_seen_at = 7;
+  google.protobuf.Timestamp last_seen_at = 8;
+}
+
+message KubernetesNamespaceEventsResultV1 {
+  KubernetesEventsOutcome outcome = 1;
+  // Present only on SUCCESS, ordered oldest first.
+  repeated KubernetesEvent events = 2;
+  // Completeness basis the central certificate consumes — must arrive intact.
+  int32 returned_event_count = 3;
+  // True iff the single bounded LIST returned no continuation token, which means every
+  // event the namespace held was seen and the window was applied to all of them. The
+  // Kubernetes API neither sorts events nor filters them by time, so a page that ended
+  // at a continuation token is an arbitrary subset and the window filter over it proves
+  // nothing. Certified absence claims are minted centrally and ONLY from a complete read.
+  bool complete = 4;
+  // True when the requested window begins before the retention horizon below, which
+  // means an empty result cannot distinguish "nothing happened" from "the cluster
+  // already discarded it". The control plane records a CoverageGap, never an absence.
+  bool window_predates_retention = 5;
+  // The customer-authored event retention horizon this Relay applied, so the basis for
+  // the flag above is visible rather than assumed. It is local policy: the control
+  // plane cannot set it and does not know a cluster's --event-ttl.
+  google.protobuf.Duration applied_retention_horizon = 6;
+  // Source-observed read time; provenance only.
+  google.protobuf.Timestamp read_at = 7;
+  // Effective event bound applied (dispatch bound possibly lowered by local caps).
+  uint32 applied_max_events = 8;
+}
