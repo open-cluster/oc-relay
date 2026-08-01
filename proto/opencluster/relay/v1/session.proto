@@ -44,11 +44,46 @@ message CapabilityArguments {
 }
 
 message CapabilityResult {
+  // What this organization's own redaction policy withheld before the result was
+  // serialized. It rides INSIDE the capability payload rather than beside it because
+  // the control plane persists this message and nothing else: a report on the envelope
+  // would be dropped at the recording transaction, and masking would be indistinguishable
+  // from absence exactly where it matters most.
+  RedactionReport redaction = 1;
   oneof result {
     KubernetesWorkloadRuntimeResultV1 kubernetes_workload_runtime_v1 = 10;
     KubernetesNamespaceEventsResultV1 kubernetes_namespace_events_v1 = 11;
     KubernetesContainerLogsResultV1 kubernetes_container_logs_v1 = 12;
   }
+}
+
+// What redaction removed, reported as counts and rule identifiers and NOTHING else.
+//
+// The masked value is never transmitted in any form: not partially, not length-preserved,
+// and not as a digest — a hash of a low-entropy secret is recoverable by brute force, which
+// would defeat the purpose while appearing to serve it. The occurrence count is a
+// deliberate, bounded side channel: reporting that a field held four masked values tells
+// the platform something it would not otherwise know, and the alternative — reporting
+// nothing — makes masking indistinguishable from absence, which is the more serious failure.
+//
+// An absent report means nothing was masked. It never means redaction did not run: a result
+// that did not pass the enforcement point is never serialized at all.
+message RedactionReport {
+  repeated RedactedField fields = 1;
+}
+
+// One declared free-text field the policy swept, and what it found there.
+message RedactedField {
+  // The declared field, in the contract's own terms — the result message's field, dotted
+  // through any repeated message it sits in, as in
+  // "kubernetes_container_logs_v1.lines.content". Named rather than numbered so an
+  // operator reading a coverage gap recognises what was withheld.
+  string field_name = 1;
+  // How many occurrences were masked in it, across every element of a repeated field.
+  uint32 masked_occurrence_count = 2;
+  // Which rules matched, deduplicated and ordered, so a reader can ask the right person
+  // to adjust the policy rather than guessing which pattern was too broad.
+  repeated string rule_ids = 3;
 }
 
 // ---------------------------------------------------------------------------------

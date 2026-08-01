@@ -54,6 +54,21 @@ type Config struct {
 	// Register call verifies the control plane against these pins.
 	InitialSPKIPins []string
 
+	// RedactionPolicyFile points at the customer-authored redaction policy: a nested YAML
+	// document under a `redaction:` root that may only ADD to the built-in masking. Empty
+	// means the operator has not written one and the built-in defaults are in force — which
+	// is a safe install rather than an unprotected one.
+	//
+	// It is a path rather than a value for the same reason the bootstrap token is: the file
+	// that governs what may leave this cluster must not be readable from a process listing.
+	// It should be mounted read-only and owned by the account the Relay runs as, mode 0400 —
+	// a world-readable policy tells any local process exactly which shapes are NOT masked.
+	//
+	// A path that is set and cannot be read is fatal to every capability that could emit free
+	// text. It never falls back to the defaults: an operator who named a file meant it to be
+	// enforced.
+	RedactionPolicyFile string
+
 	LocalMaxPods      int64
 	MaxConcurrentJobs uint32
 	HeartbeatInterval time.Duration
@@ -113,6 +128,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 
 	cfg.BootstrapTokenFile, _ = lookup("RELAY_BOOTSTRAP_TOKEN_FILE")
 	cfg.KubeconfigPath, _ = lookup("RELAY_KUBECONFIG")
+	cfg.RedactionPolicyFile, _ = lookup("RELAY_REDACTION_POLICY_FILE")
 
 	if cfg.LocalMaxPods, err = volumeCap(lookup, "RELAY_LOCAL_MAX_PODS", maxLocalPods, cfg.LocalMaxPods); err != nil {
 		return Config{}, err

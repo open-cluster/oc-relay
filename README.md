@@ -31,6 +31,18 @@ allowlist, hard rate/volume caps, masking rules) cannot be modified by the contr
 plane. The full per-capability egress statement ships with each capability's
 documentation.
 
+**Secrets are masked before anything is serialized.** One enforcement point sits between a
+capability's typed result and the wire; no capability applies its own masking and none can opt
+out. High-confidence secret shapes are masked from the first install with no configuration, and a
+customer-authored policy may add patterns and field exclusions — it can only ever make masking
+stricter. Every masked occurrence is counted and attributed to the rule that matched it; the value
+is never sent, never hashed and never partially revealed. See `docs/redaction.md` for the policy
+format, the file's required permissions, and the local dry run that shows what a policy would mask
+before it costs an investigation.
+
+> **Installation gate:** no cluster containing real data may be connected until a redaction policy
+> is in force.
+
 ## Repository layout
 
 - `proto/opencluster/relay/v1/` — the protocol source of truth (Buf-managed)
@@ -39,7 +51,7 @@ documentation.
 - `docs/` — protocol and design documentation
 - `cmd/opencluster-relay/` — the composition root
 - `internal/` — identity, session runtime, read-only Kubernetes port, capabilities,
-  configuration, pinned transport, and the local audit trail
+  redaction, configuration, pinned transport, and the local audit trail
 
 ## Development
 

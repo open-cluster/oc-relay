@@ -10,7 +10,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -32,6 +34,7 @@ import (
 	"github.com/open-cluster/oc-relay/internal/config"
 	"github.com/open-cluster/oc-relay/internal/identity"
 	"github.com/open-cluster/oc-relay/internal/kube"
+	"github.com/open-cluster/oc-relay/internal/redaction"
 	"github.com/open-cluster/oc-relay/internal/session"
 	"github.com/open-cluster/oc-relay/internal/transport"
 
@@ -51,19 +54,50 @@ const (
 	outboundBufferSize = 64
 )
 
+// options is what the command line says, as distinct from what the environment says. There is
+// one of them, and it selects a local diagnostic mode rather than tuning the running Relay:
+// process configuration stays in the environment, where it is one mechanism rather than two.
+type options struct {
+	// dryRunSample names a file of operator-supplied sample text to evaluate the redaction
+	// policy against, "-" for standard input. It runs locally and exits: no control plane, no
+	// cluster, no identity, no session.
+	dryRunSample string
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
-	if err := run(logger); err != nil {
+
+	var chosen options
+	flag.StringVar(&chosen.dryRunSample, "redaction-dry-run", "",
+		"evaluate the redaction policy against sample text in this file (\"-\" for stdin), "+
+			"report what would be masked, and exit")
+	flag.Parse()
+
+	if err := run(logger, chosen); err != nil {
 		logger.Error("relay exiting", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
+func run(logger *slog.Logger, chosen options) error {
 	cfg, err := config.Load(os.LookupEnv)
 	if err != nil {
 		return err
+	}
+
+	// The redaction policy is loaded and reported before anything else happens, because a
+	// fault in it changes what this process may do at all — and because an operator has to be
+	// able to see what is actually in force rather than assume it.
+	guard := redaction.Load(cfg.RedactionPolicyFile)
+	guard.Describe(logger)
+
+	// Evaluating a policy against sample text is a local operation and deliberately needs no
+	// control plane, no cluster and no identity. A policy whose breadth is only discoverable
+	// by losing an investigation is a policy nobody will tune, so this path exits before any
+	// of that is built.
+	if chosen.dryRunSample != "" {
+		return dryRun(guard, chosen.dryRunSample, os.Stdout)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -129,7 +163,7 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	executor := audit.NewExecutor(registry, logger)
+	executor := guardedExecutor(registry, guard, logger)
 	relaySession := session.New(session.Config{
 		OrgID:              credential.OrgID,
 		RegistrationID:     credential.RegistrationID,
@@ -175,6 +209,50 @@ func compiledCapabilities(reader *kube.Reader, cfg config.Config) *capabilities.
 		LocalMaxBytes: cfg.LocalMaxLogBytes,
 	}))
 	return registry
+}
+
+// guardedExecutor is the order the two decorators go in, and the order is the guarantee.
+//
+// Redaction sits INSIDE the audit decorator, so what audit measures and writes to the Relay's
+// own log is the result AFTER masking. The Relay must not log what it just removed: diagnosing
+// the Relay cannot be allowed to become the disclosure channel redaction exists to close, and
+// an audit line reporting the unredacted size would leak the length of what was masked.
+//
+// It is a named function rather than one expression inline so that the ordering can be tested
+// rather than only read. Getting these two the wrong way round is silent — everything still
+// works, and the log quietly measures the wrong thing.
+func guardedExecutor(
+	inner session.Executor, guard *redaction.Guard, logger *slog.Logger,
+) session.Executor {
+	return audit.NewExecutor(guard.Enforce(inner), logger)
+}
+
+// dryRun reports what the effective policy would mask in operator-supplied sample text.
+//
+// A faulted policy refuses here exactly as it refuses a capability, rather than previewing the
+// defaults. Showing an operator what the defaults would have done to text their own policy was
+// meant to govern is the one answer that would actively mislead them.
+func dryRun(guard *redaction.Guard, samplePath string, out io.Writer) error {
+	if fault := guard.Fault(); fault != nil {
+		return fault
+	}
+
+	var (
+		sample []byte
+		err    error
+	)
+	if samplePath == "-" {
+		sample, err = io.ReadAll(os.Stdin)
+	} else {
+		sample, err = os.ReadFile(samplePath)
+	}
+	if err != nil {
+		return fmt.Errorf("reading the sample text: %w", err)
+	}
+
+	preview := guard.Policy().DryRun(string(sample))
+	_, err = io.WriteString(out, preview.Render(guard.Policy()))
+	return err
 }
 
 // newWorkloadReader builds the read-only Kubernetes boundary. In-cluster
