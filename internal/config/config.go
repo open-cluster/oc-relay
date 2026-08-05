@@ -69,6 +69,15 @@ type Config struct {
 	// enforced.
 	RedactionPolicyFile string
 
+	// InventoryConfigFile points at the operator's constraints on inventory
+	// synchronization: a nested YAML document under an `inventory:` root that can
+	// disable the path, narrow the watched namespaces, and floor the interval the
+	// control plane may request. Empty means no file and the built-in defaults apply —
+	// enabled, constrained only by RELAY_ALLOWED_NAMESPACES, floored at the built-in
+	// minimum. A path that is set and cannot be read is fatal: an operator who named a
+	// file meant it to be enforced.
+	InventoryConfigFile string
+
 	LocalMaxPods      int64
 	MaxConcurrentJobs uint32
 	HeartbeatInterval time.Duration
@@ -129,6 +138,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	cfg.BootstrapTokenFile, _ = lookup("RELAY_BOOTSTRAP_TOKEN_FILE")
 	cfg.KubeconfigPath, _ = lookup("RELAY_KUBECONFIG")
 	cfg.RedactionPolicyFile, _ = lookup("RELAY_REDACTION_POLICY_FILE")
+	cfg.InventoryConfigFile, _ = lookup("RELAY_INVENTORY_CONFIG_FILE")
 
 	if cfg.LocalMaxPods, err = volumeCap(lookup, "RELAY_LOCAL_MAX_PODS", maxLocalPods, cfg.LocalMaxPods); err != nil {
 		return Config{}, err

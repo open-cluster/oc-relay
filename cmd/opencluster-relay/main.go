@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 
 	"github.com/open-cluster/oc-relay/internal/audit"
@@ -33,6 +34,7 @@ import (
 	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/runtime"
 	"github.com/open-cluster/oc-relay/internal/config"
 	"github.com/open-cluster/oc-relay/internal/identity"
+	"github.com/open-cluster/oc-relay/internal/inventory"
 	"github.com/open-cluster/oc-relay/internal/kube"
 	"github.com/open-cluster/oc-relay/internal/redaction"
 	"github.com/open-cluster/oc-relay/internal/session"
@@ -100,6 +102,14 @@ func run(logger *slog.Logger, chosen options) error {
 		return dryRun(guard, chosen.dryRunSample, os.Stdout)
 	}
 
+	// Loaded before anything cluster-facing for the same reason the redaction policy
+	// is: a constraints file that does not parse must stop the process at startup,
+	// not surface as a scope that quietly never synchronizes.
+	inventoryLocal, err := inventory.LoadLocal(cfg.InventoryConfigFile)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -120,10 +130,16 @@ func run(logger *slog.Logger, chosen options) error {
 
 	// The read-only cluster client serves every capability and reads the cluster
 	// fingerprint the session Hello carries (and enrollment attests).
-	reader, err := newWorkloadReader(cfg)
+	restConfig, err := restConfigFor(cfg)
 	if err != nil {
 		return err
 	}
+	restConfig.UserAgent = "opencluster-relay/" + version
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("building kubernetes client: %w", err)
+	}
+	reader := kube.NewReader(clientset)
 	fingerprint, err := clusterFingerprint(ctx, reader)
 	if err != nil {
 		return fmt.Errorf("reading cluster fingerprint: %w", err)
@@ -175,6 +191,23 @@ func run(logger *slog.Logger, chosen options) error {
 		ResendInterval:     cfg.ResendInterval,
 		OutboundBuffer:     outboundBufferSize,
 	}, executor)
+
+	// Change detection runs on its own clock, beside the session rather than inside
+	// it: a dropped stream must not stop observation, only delivery. The synchronizer
+	// idles until the control plane sends a policy over the session.
+	if inventoryLocal.Enabled {
+		metadataClient, metaErr := metadata.NewForConfig(restConfig)
+		if metaErr != nil {
+			return fmt.Errorf("building metadata client: %w", metaErr)
+		}
+		synchronizer := inventory.NewSynchronizer(
+			kube.NewInventoryLister(clientset, metadataClient),
+			inventoryLocal, cfg.AllowedNamespaces, nil)
+		relaySession.AttachInventory(synchronizer)
+		go func() { _ = synchronizer.Run(ctx) }()
+	} else {
+		logger.Info("inventory synchronization disabled by local configuration")
+	}
 
 	logger.Info("relay session starting",
 		slog.String("registration_id", credential.RegistrationID),
@@ -255,22 +288,9 @@ func dryRun(guard *redaction.Guard, samplePath string, out io.Writer) error {
 	return err
 }
 
-// newWorkloadReader builds the read-only Kubernetes boundary. In-cluster
-// ServiceAccount configuration is the production default; an explicit kubeconfig is
-// the operator-configured harness path through the hardened loader.
-func newWorkloadReader(cfg config.Config) (*kube.Reader, error) {
-	restConfig, err := restConfigFor(cfg)
-	if err != nil {
-		return nil, err
-	}
-	restConfig.UserAgent = "opencluster-relay/" + version
-	clientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return nil, fmt.Errorf("building kubernetes client: %w", err)
-	}
-	return kube.NewReader(clientset), nil
-}
-
+// restConfigFor selects the read-only Kubernetes boundary's client configuration.
+// In-cluster ServiceAccount configuration is the production default; an explicit
+// kubeconfig is the operator-configured harness path through the hardened loader.
 func restConfigFor(cfg config.Config) (*rest.Config, error) {
 	if cfg.KubeconfigPath != "" {
 		restConfig, err := kube.LoadKubeconfig(cfg.KubeconfigPath)

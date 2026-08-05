@@ -22,6 +22,7 @@ syntax = "proto3";
 package opencluster.relay.v1;
 
 import "google/protobuf/duration.proto";
+import "opencluster/relay/v1/inventory_synchronization.proto";
 import "opencluster/relay/v1/kubernetes_container_logs.proto";
 import "opencluster/relay/v1/kubernetes_namespace_events.proto";
 import "opencluster/relay/v1/kubernetes_workload_runtime.proto";
@@ -125,6 +126,11 @@ message Heartbeat {
   // Attestations refreshed between hellos; last-seen is stamped server-side.
   string local_policy_hash = 2;
   uint32 in_flight_count = 3;
+  // Freshness stamps for every inventory scope this Relay synchronizes. On the
+  // heartbeat rather than in a message of their own because a tick that found nothing
+  // changed sends no delta, and the ledger's currency must still be confirmed rather
+  // than assumed.
+  repeated InventoryScopeStatus inventory_scopes = 4;
 }
 
 // Assignment received and queued for execution. Proves reception ONLY — the job was
@@ -232,6 +238,7 @@ message RelayToControl {
     DrainState drain_state = 7;
     RotationConfirm rotation_confirm = 8;
     ProtocolError protocol_error = 9;
+    InventoryDelta inventory_delta = 10;
   }
 }
 
@@ -337,6 +344,8 @@ message ControlToRelay {
     DrainInstruction drain_instruction = 6;
     CapabilityRequirements capability_requirements = 7;
     GracefulReconnect graceful_reconnect = 8;
+    InventorySynchronizationPolicy inventory_synchronization_policy = 9;
+    InventoryDeltaAck inventory_delta_ack = 10;
   }
 }
 

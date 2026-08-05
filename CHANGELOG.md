@@ -7,6 +7,32 @@ releases yet; nothing here fabricates a release history.
 
 ### Added
 
+- **Inventory synchronization — the change ledger's Relay half.** A local schedule lists each
+  watched scope's declared intent — workload images, declared replicas, resource requests and
+  limits, referenced ConfigMap and Secret names, the declared-intent revision, and a pod
+  template hash — diffs it against the previous tick, and queues deltas the session pushes over
+  the existing stream. Detection runs beside the session rather than inside it, so a
+  disconnected Relay keeps observing and flushes when the stream is back. Nothing on this path
+  is leased or fenced: deltas are at-least-once with a server-side dedup key, resent until
+  acknowledged, and an unflushed backlog is recovered by a fresh baseline rather than unbounded
+  memory. The first successful tick per scope is a baseline, marked as such, so installing or
+  restarting a Relay never appears as everything changing at once. ConfigMaps and Secrets are
+  read through the metadata client and recorded by identity and resource version only — content
+  cannot enter Relay memory on this path, let alone leave it. No status field is watched, and
+  the reduced intent type is what makes that structural.
+
+- Contract: `InventorySynchronizationPolicy` and `InventoryDeltaAck` (control → relay),
+  `InventoryDelta` (relay → control), and per-scope freshness stamps on the heartbeat, so a
+  tick that found nothing changed still confirms the ledger is current without a message of its
+  own. The change is additive and `buf breaking` passes. **The contract is still untagged**:
+  with the redaction report this now needs `gen/go/v0.4.0`, and until it is pushed the control
+  plane resolves the module through its `replace` directive.
+
+- `RELAY_INVENTORY_CONFIG_FILE` names the operator's constraints, nested under an `inventory:`
+  root: an enable switch, a namespace allowlist for synchronization, and a floor under any
+  control-plane-requested interval. The control plane requests; local configuration constrains.
+  No file means enabled, constrained only by `RELAY_ALLOWED_NAMESPACES`, floored at 30 seconds.
+
 - **Relay-side redaction.** One enforcement point between a capability's typed result and its
   serialization; nothing reaches the wire without passing through it. Built-in defaults are on
   from the first install and cover high-confidence shapes only — private key blocks, authorization

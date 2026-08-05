@@ -1,0 +1,157 @@
+// OpenCluster Relay protocol v1 — inventory synchronization, the change ledger's
+// transport.
+//
+// This path exists because change history is the one class of operational context that
+// decays at the source: events expire, revision history is bounded, and a ConfigMap edit
+// leaves nothing behind. Everything else is read live on demand, so everything else is
+// deliberately absent here.
+//
+// It is NOT the job path. Deltas are at-least-once with a dedup key derived from the
+// Connection, the object identity including UID, and the observed revision — a
+// redelivery collapses server-side, so nothing here is leased, fenced, or acknowledged
+// with a disposition taxonomy. Losing a message is recovered by resend-until-ack; losing
+// a whole window is recovered by the next baseline and is reported as a coverage
+// boundary, never papered over.
+//
+// What travels is DECLARED INTENT AND IDENTITY, never observed state and never content.
+// Images, declared replica counts, resource requests and limits, referenced ConfigMap
+// and Secret names, revisions and a template hash. No status field can be expressed
+// here, which is what keeps an investigation product from becoming a monitoring
+// platform one field at a time. Secret and ConfigMap changes carry identity and resource
+// version only: the fact of a rotation is visible, the value never leaves the cluster.
+//
+// Nothing on this path can execute anything: messages carry observations outward only,
+// there is no request-response, and widening what is watched can never widen what runs.
+
+syntax = "proto3";
+
+package opencluster.relay.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "OpenCluster.Relay.Protocol.V1";
+option go_package = "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1;relayv1";
+
+// What the control plane asks a Relay to watch for one Connection, and how often. A
+// REQUEST, not an instruction: the Relay intersects the namespaces with its own local
+// configuration and floors the interval at its local minimum, so a server-side change
+// can narrow what is watched but can never increase load on a customer's cluster.
+message InventorySynchronizationPolicy {
+  // The evidence Connection this scope reports through. The Environment of every
+  // resulting ledger entry is derived from it server-side; nothing here declares one.
+  string connection_id = 1;
+  // Monotonic per Connection. Deltas and scope statuses echo it so the control plane
+  // can tell which request a Relay is answering after a change.
+  uint64 revision = 2;
+  // Namespaces to watch, each a DNS-1123 label. Empty means every namespace the
+  // Relay's local configuration allows — the local allowlist always constrains.
+  repeated string namespaces = 3;
+  // Requested tick interval. The Relay applies max(requested, local floor).
+  google.protobuf.Duration requested_interval = 4;
+}
+
+// Rides on the heartbeat so freshness costs no message of its own: a tick that found
+// nothing changed sends no delta, and the stamp here is how the control plane still
+// learns the ledger is current rather than assuming it. One entry per scope this Relay
+// is synchronizing.
+message InventoryScopeStatus {
+  string connection_id = 1;
+  uint64 policy_revision = 2;
+  // When the most recent successful tick READ the cluster, on the Relay's clock.
+  // Provenance only; the control plane stamps receipt with its own clock.
+  google.protobuf.Timestamp last_completed_at = 3;
+  // True when the most recent tick failed to read the cluster. A faulted scope is
+  // stale no matter what the stamp says, and the control plane records the
+  // consequence rather than inferring silence means health.
+  bool faulted = 4;
+  // True when any list in the most recent tick returned a continuation token, so the
+  // tick saw a bounded page rather than everything. Changes in the unseen remainder
+  // are invisible until a complete tick.
+  bool truncated = 5;
+}
+
+// The closed set of watched object kinds. Closed because "what we record" is a
+// decision, not an accident of what the API returns; widening it is a contract change
+// that review sees.
+enum InventoryObjectKind {
+  INVENTORY_OBJECT_KIND_UNSPECIFIED = 0;
+  INVENTORY_OBJECT_KIND_DEPLOYMENT = 1;
+  INVENTORY_OBJECT_KIND_STATEFULSET = 2;
+  INVENTORY_OBJECT_KIND_DAEMONSET = 3;
+  INVENTORY_OBJECT_KIND_CONFIGMAP = 4;
+  INVENTORY_OBJECT_KIND_SECRET = 5;
+}
+
+enum InventoryChangeKind {
+  INVENTORY_CHANGE_KIND_UNSPECIFIED = 0;
+  INVENTORY_CHANGE_KIND_CREATED = 1;
+  INVENTORY_CHANGE_KIND_MODIFIED = 2;
+  INVENTORY_CHANGE_KIND_DELETED = 3;
+}
+
+// One watched field that moved, with both values, so "a deploy happened" can be read
+// as "the memory limit was halved". Values are identifiers, image references,
+// quantities, sorted name lists, revisions or hashes — never file content, never an
+// environment value, never anything a redaction policy would have to sweep.
+message InventoryFieldChange {
+  // The field in the workload's own terms, e.g.
+  // "spec.template.spec.containers[api].image". Composed Relay-side from a closed
+  // vocabulary; max 253 chars.
+  string field = 1;
+  // Max 512 chars each. Empty means the field was absent on that side of the change.
+  string before = 2;
+  string after = 3;
+}
+
+// One object as observed to differ from the previous tick — or, in a baseline, one
+// object as first observed.
+message InventoryObjectChange {
+  // DNS-1123 label, max 63 chars.
+  string namespace = 1;
+  InventoryObjectKind kind = 2;
+  // DNS-1123 subdomain, max 253 chars.
+  string name = 3;
+  // The cluster's UID for this object incarnation. Identity includes it because a
+  // workload deleted and recreated under the same name is a replacement, not a
+  // mutation, and a ledger that merges the two reads history that never happened.
+  string uid = 4;
+  // The declared-intent revision this observation saw: metadata.generation for
+  // workloads, resourceVersion for ConfigMaps and Secrets. A dedup key component.
+  // Empty exactly when change is DELETED — a UID is deleted at most once, so emptiness
+  // is itself unique per object.
+  string observed_revision = 5;
+  InventoryChangeKind change = 6;
+  // Itemized for MODIFIED; for CREATED and for baseline entries it carries the
+  // watched fields' current values so later diffs have a visible starting point.
+  // Empty for DELETED.
+  repeated InventoryFieldChange fields = 7;
+}
+
+// One tick's observed differences for one scope. Bounded: a delta carries at most 512
+// object changes; a tick that would exceed the bound reports truncated status and the
+// remainder waits for the next tick.
+message InventoryDelta {
+  // Relay-assigned identifier the ack echoes. The Relay resends an unacked delta;
+  // the server-side dedup key makes the resend collapse, so the id carries no
+  // authority — it only lets the Relay stop.
+  string delta_id = 1;
+  string connection_id = 2;
+  uint64 policy_revision = 3;
+  // True for the first successful tick of a scope in this Relay process. A baseline
+  // records where watching began — installing a Relay must not appear in the ledger
+  // as everything changing at once, and a restart must not appear as a second
+  // creation of the world.
+  bool baseline = 4;
+  // When the cluster was read, on the Relay's clock. Provenance: paired with the
+  // control plane's receipt clock so a delayed delivery is distinguishable from a
+  // delayed change.
+  google.protobuf.Timestamp observed_at = 5;
+  repeated InventoryObjectChange changes = 6;
+}
+
+// Definitive only in the sense that the recording transaction committed; a duplicate
+// arriving later is collapsed by the dedup key, so this needs no disposition taxonomy.
+message InventoryDeltaAck {
+  string delta_id = 1;
+}

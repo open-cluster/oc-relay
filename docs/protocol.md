@@ -153,6 +153,7 @@ knows their apiserver's `--event-ttl`.
 | `RELAY_LOCAL_MAX_LOG_BYTES` | Caps bytes per log read | 262144 (the schema maximum) |
 | `RELAY_ALLOWED_NAMESPACES` | The complete set of readable namespaces | unset — narrows nothing, RBAC is the boundary |
 | `RELAY_EVENT_RETENTION` | Attested event-retention horizon | 1h (the Kubernetes default event TTL) |
+| `RELAY_INVENTORY_CONFIG_FILE` | Operator constraints on inventory synchronization, nested under an `inventory:` root: an enable switch, a namespace allowlist for watching, and a floor under any control-plane-requested interval | unset — enabled, constrained only by `RELAY_ALLOWED_NAMESPACES`, floored at 30s |
 
 A value above a schema maximum is refused at startup rather than clamped: an operator who
 typed a number the product cannot serve should be told, not quietly given a smaller one. A

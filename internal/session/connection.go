@@ -150,6 +150,16 @@ func (s *Session) receiveLoop(
 			case drainDeadline <- m.DrainInstruction.GetDeadline().AsDuration():
 			default:
 			}
+		case *relayv1.ControlToRelay_InventorySynchronizationPolicy:
+			// A policy with no inventory attached is dropped, not errored: the envelope
+			// evolves additively and a build that runs no detection owes nothing here.
+			if s.inventory != nil {
+				s.inventory.ApplyPolicy(m.InventorySynchronizationPolicy)
+			}
+		case *relayv1.ControlToRelay_InventoryDeltaAck:
+			if s.inventory != nil {
+				s.inventory.Ack(m.InventoryDeltaAck.GetDeltaId())
+			}
 		}
 	}
 }
@@ -318,7 +328,9 @@ func (s *Session) deliver(ctx context.Context, sender *sender, result *relayv1.J
 }
 
 // heartbeatLoop proves session liveness on a fixed interval. A heartbeat says nothing
-// about job progress — job truth advances only through results.
+// about job progress — job truth advances only through results. It does carry the
+// inventory freshness stamps, because a tick that found nothing changed sends no delta
+// and the heartbeat is the only cadence left for confirming the ledger is current.
 func (s *Session) heartbeatLoop(ctx context.Context, sender *sender) error {
 	ticker := time.NewTicker(s.config.HeartbeatInterval)
 	defer ticker.Stop()
@@ -327,7 +339,7 @@ func (s *Session) heartbeatLoop(ctx context.Context, sender *sender) error {
 		select {
 		case <-ticker.C:
 			sequence++
-			if err := sender.enqueue(ctx, heartbeat(sequence)); err != nil {
+			if err := sender.enqueue(ctx, heartbeat(sequence, s.inventoryStatuses())); err != nil {
 				return err
 			}
 		case <-ctx.Done():
@@ -336,9 +348,18 @@ func (s *Session) heartbeatLoop(ctx context.Context, sender *sender) error {
 	}
 }
 
+func (s *Session) inventoryStatuses() []*relayv1.InventoryScopeStatus {
+	if s.inventory == nil {
+		return nil
+	}
+	return s.inventory.Statuses()
+}
+
 // resendLoop re-emits every unacked result on a fixed interval until the control plane
 // acknowledges it. Recording is idempotent, so a resend of an already-recorded result is
-// answered with ALREADY_RECORDED and dropped.
+// answered with ALREADY_RECORDED and dropped. Pending inventory deltas ride the same
+// cadence and the same until-acked contract; their recording is deduplicated
+// server-side, so a resend collapses rather than duplicating history.
 func (s *Session) resendLoop(ctx context.Context, sender *sender) error {
 	ticker := time.NewTicker(s.config.ResendInterval)
 	defer ticker.Stop()
@@ -350,6 +371,15 @@ func (s *Session) resendLoop(ctx context.Context, sender *sender) error {
 					Message: &relayv1.RelayToControl_JobResult{JobResult: result},
 				}); err != nil {
 					return err
+				}
+			}
+			if s.inventory != nil {
+				for _, delta := range s.inventory.Pending() {
+					if err := sender.enqueue(ctx, &relayv1.RelayToControl{
+						Message: &relayv1.RelayToControl_InventoryDelta{InventoryDelta: delta},
+					}); err != nil {
+						return err
+					}
 				}
 			}
 		case <-ctx.Done():
@@ -372,9 +402,11 @@ func started(jobID string, epoch uint64) *relayv1.RelayToControl {
 	}
 }
 
-func heartbeat(sequence uint64) *relayv1.RelayToControl {
+func heartbeat(sequence uint64, scopes []*relayv1.InventoryScopeStatus) *relayv1.RelayToControl {
 	return &relayv1.RelayToControl{
-		Message: &relayv1.RelayToControl_Heartbeat{Heartbeat: &relayv1.Heartbeat{Sequence: sequence}},
+		Message: &relayv1.RelayToControl_Heartbeat{
+			Heartbeat: &relayv1.Heartbeat{Sequence: sequence, InventoryScopes: scopes},
+		},
 	}
 }
 
