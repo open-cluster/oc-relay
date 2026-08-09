@@ -22,6 +22,18 @@ type Executor interface {
 	Execute(ctx context.Context, job *relayv1.JobAssignment) *relayv1.JobResult
 }
 
+// Inventory is the session's view of change detection: policies and acks flow in off
+// the receive loop, pending deltas flow out through the resend loop, and freshness
+// stamps ride each heartbeat. The session never schedules a tick — detection runs on
+// its own clock and outlives any one connection, which is what lets a Relay keep
+// observing while disconnected and flush when the stream is back.
+type Inventory interface {
+	ApplyPolicy(policy *relayv1.InventorySynchronizationPolicy)
+	Ack(deltaID string)
+	Pending() []*relayv1.InventoryDelta
+	Statuses() []*relayv1.InventoryScopeStatus
+}
+
 // Config is the non-secret session configuration. The credential itself is presented in
 // call metadata by the connector, never stored on the session.
 type Config struct {
@@ -43,9 +55,10 @@ type Config struct {
 // in-flight roster, and the outstanding-work semaphore survive a dropped connection so a
 // reconnect resumes cleanly.
 type Session struct {
-	config   Config
-	executor Executor
-	unacked  *unacked
+	config    Config
+	executor  Executor
+	unacked   *unacked
+	inventory Inventory // nil when this build or deployment runs no change detection
 
 	// outstanding bounds total in-flight work — jobs executing PLUS results awaiting a
 	// ResultAck — to the advertised concurrency. A slot is acquired at admission and
@@ -74,6 +87,12 @@ func New(config Config, executor Executor) *Session {
 		outstanding: make(chan struct{}, capacity),
 		inFlight:    make(map[string]uint64),
 	}
+}
+
+// AttachInventory hands the session its change-detection surface. Called once, before
+// Run; a session without one simply carries no inventory traffic.
+func (s *Session) AttachInventory(inventory Inventory) {
+	s.inventory = inventory
 }
 
 // acquireSlot reserves one unit of outstanding-work capacity without blocking; it reports

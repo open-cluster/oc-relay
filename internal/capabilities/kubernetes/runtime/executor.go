@@ -3,11 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
-	"regexp"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/open-cluster/oc-relay/internal/capabilities"
 	"github.com/open-cluster/oc-relay/internal/kube"
 
 	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
@@ -20,11 +20,6 @@ const (
 	MaxWorkloadPods = 50
 )
 
-var (
-	dns1123Label     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	dns1123Subdomain = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
-)
-
 // Executor runs the kubernetes.workload.runtime.v1 capability through the read-only kube
 // port, holding the capability's semantic contract: a closed workload vocabulary
 // validated before any cluster contact, complete selector rendering that REFUSES
@@ -33,56 +28,50 @@ var (
 // a deadline budget measured from receipt — a budget expiry is a timeout, a caller
 // cancellation is a cancellation, and the two are never confused.
 type Executor struct {
-	reader       kube.WorkloadReader
-	localMaxPods int64
+	reader  kube.WorkloadReader
+	options Options
 }
 
-// NewExecutor builds the capability executor. localMaxPods is the customer-authored local
-// cap; the effective page size is min(dispatched max_pods, localMaxPods), clamped to
-// [MinWorkloadPods, MaxWorkloadPods].
-func NewExecutor(reader kube.WorkloadReader, localMaxPods int64) *Executor {
-	return &Executor{reader: reader, localMaxPods: localMaxPods}
+// Options is the executor's customer-authored configuration. Every field may narrow a read
+// and none may widen one.
+type Options struct {
+	// Policy may refuse a namespace outright.
+	Policy capabilities.LocalPolicy
+	// LocalMaxPods lowers the pod bound. Zero means the operator set none.
+	LocalMaxPods int64
 }
 
-// Execute runs one workload-runtime job to a typed result. The deadline budget is applied
-// on a fresh timeout derived from the job context; a budget expiry returns KIND_TIMEOUT
-// while a cancellation of the parent context (control-plane Cancellation or teardown)
-// returns KIND_CANCELLED.
+// NewExecutor builds the capability executor.
+func NewExecutor(reader kube.WorkloadReader, options Options) *Executor {
+	return &Executor{reader: reader, options: options}
+}
+
+// Execute runs one workload-runtime job to a typed result. The deadline budget and the
+// timeout-versus-cancellation distinction are the shared capability discipline; what is
+// specific to this capability is everything below read.
 func (e *Executor) Execute(ctx context.Context, job *relayv1.JobAssignment) *relayv1.JobResult {
 	args := job.GetArguments().GetKubernetesWorkloadRuntimeV1()
 	if !validArgs(args) {
-		return failure(job, relayv1.JobFailure_KIND_ARGUMENTS_REJECTED)
+		return capabilities.Failure(job, relayv1.JobFailure_KIND_ARGUMENTS_REJECTED)
+	}
+	// A namespace the operator excluded is excluded from EVERY read. A guarantee that held
+	// for two capabilities and not the third would be worse than none, because an operator
+	// would believe it held for all.
+	if !e.options.Policy.AllowsNamespace(args.GetNamespace()) {
+		return capabilities.Failure(job, relayv1.JobFailure_KIND_LOCAL_POLICY_REFUSED)
 	}
 
-	execCtx := ctx
-	var cancel context.CancelFunc
-	if budget := job.GetDeadlineBudget().AsDuration(); budget > 0 {
-		execCtx, cancel = context.WithTimeout(ctx, budget)
-		defer cancel()
-	}
-
-	result := e.read(execCtx, args)
-
-	// Totality at the boundary: a cancellation of the parent context is a cancellation; a
-	// deadline-budget expiry is a timeout. Distinguish them before reporting.
-	if ctx.Err() != nil {
-		return failure(job, relayv1.JobFailure_KIND_CANCELLED)
-	}
-	if errors.Is(execCtx.Err(), context.DeadlineExceeded) && result.GetOutcome() != relayv1.KubernetesReadOutcome_KUBERNETES_READ_OUTCOME_SUCCESS {
-		return failure(job, relayv1.JobFailure_KIND_TIMEOUT)
-	}
-
-	return &relayv1.JobResult{
-		JobId:      job.GetJobId(),
-		LeaseEpoch: job.GetLeaseEpoch(),
-		Outcome: &relayv1.JobResult_Result{
+	return capabilities.Run(ctx, job, func(execCtx context.Context) capabilities.Reading {
+		result := e.read(execCtx, args)
+		return capabilities.Reading{
 			Result: &relayv1.CapabilityResult{
 				Result: &relayv1.CapabilityResult_KubernetesWorkloadRuntimeV1{
 					KubernetesWorkloadRuntimeV1: result,
 				},
 			},
-		},
-	}
+			Reached: result.GetOutcome() == relayv1.KubernetesReadOutcome_KUBERNETES_READ_OUTCOME_SUCCESS,
+		}
+	})
 }
 
 // read performs the workload GET, selector rendering, and bounded pod LIST, assembling the
@@ -167,31 +156,18 @@ func (e *Executor) fetchWorkload(ctx context.Context, args *relayv1.KubernetesWo
 }
 
 func (e *Executor) effectiveMaxPods(dispatched uint32) int64 {
-	applied := int64(dispatched)
-	if e.localMaxPods > 0 && e.localMaxPods < applied {
-		applied = e.localMaxPods
-	}
-	if applied < MinWorkloadPods {
-		applied = MinWorkloadPods
-	}
-	if applied > MaxWorkloadPods {
-		applied = MaxWorkloadPods
-	}
-	return applied
+	return capabilities.Lower(dispatched, e.options.LocalMaxPods, MinWorkloadPods, MaxWorkloadPods)
 }
 
 func validArgs(args *relayv1.KubernetesWorkloadRuntimeArgsV1) bool {
 	if args == nil {
 		return false
 	}
-	kind := args.GetWorkloadKind()
-	if kind == relayv1.WorkloadKind_WORKLOAD_KIND_UNSPECIFIED {
+	if args.GetWorkloadKind() == relayv1.WorkloadKind_WORKLOAD_KIND_UNSPECIFIED {
 		return false
 	}
-	namespace := args.GetNamespace()
-	name := args.GetWorkloadName()
-	return len(namespace) > 0 && len(namespace) <= 63 && dns1123Label.MatchString(namespace) &&
-		len(name) > 0 && len(name) <= 253 && dns1123Subdomain.MatchString(name)
+	return capabilities.ValidNamespace(args.GetNamespace()) &&
+		capabilities.ValidObjectName(args.GetWorkloadName())
 }
 
 func outcomeOf(err error) kube.ReadOutcome {
@@ -216,13 +192,5 @@ func wireOutcome(outcome kube.ReadOutcome) relayv1.KubernetesReadOutcome {
 		return relayv1.KubernetesReadOutcome_KUBERNETES_READ_OUTCOME_SELECTOR_UNREPRESENTABLE
 	default:
 		return relayv1.KubernetesReadOutcome_KUBERNETES_READ_OUTCOME_UNREACHABLE
-	}
-}
-
-func failure(job *relayv1.JobAssignment, kind relayv1.JobFailure_Kind) *relayv1.JobResult {
-	return &relayv1.JobResult{
-		JobId:      job.GetJobId(),
-		LeaseEpoch: job.GetLeaseEpoch(),
-		Outcome:    &relayv1.JobResult_Failure{Failure: &relayv1.JobFailure{Kind: kind}},
 	}
 }

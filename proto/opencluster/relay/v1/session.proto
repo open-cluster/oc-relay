@@ -22,6 +22,9 @@ syntax = "proto3";
 package opencluster.relay.v1;
 
 import "google/protobuf/duration.proto";
+import "opencluster/relay/v1/inventory_synchronization.proto";
+import "opencluster/relay/v1/kubernetes_container_logs.proto";
+import "opencluster/relay/v1/kubernetes_namespace_events.proto";
 import "opencluster/relay/v1/kubernetes_workload_runtime.proto";
 import "opencluster/relay/v1/registration.proto";
 
@@ -36,13 +39,52 @@ option go_package = "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v
 message CapabilityArguments {
   oneof arguments {
     KubernetesWorkloadRuntimeArgsV1 kubernetes_workload_runtime_v1 = 10;
+    KubernetesNamespaceEventsArgsV1 kubernetes_namespace_events_v1 = 11;
+    KubernetesContainerLogsArgsV1 kubernetes_container_logs_v1 = 12;
   }
 }
 
 message CapabilityResult {
+  // What this organization's own redaction policy withheld before the result was
+  // serialized. It rides INSIDE the capability payload rather than beside it because
+  // the control plane persists this message and nothing else: a report on the envelope
+  // would be dropped at the recording transaction, and masking would be indistinguishable
+  // from absence exactly where it matters most.
+  RedactionReport redaction = 1;
   oneof result {
     KubernetesWorkloadRuntimeResultV1 kubernetes_workload_runtime_v1 = 10;
+    KubernetesNamespaceEventsResultV1 kubernetes_namespace_events_v1 = 11;
+    KubernetesContainerLogsResultV1 kubernetes_container_logs_v1 = 12;
   }
+}
+
+// What redaction removed, reported as counts and rule identifiers and NOTHING else.
+//
+// The masked value is never transmitted in any form: not partially, not length-preserved,
+// and not as a digest — a hash of a low-entropy secret is recoverable by brute force, which
+// would defeat the purpose while appearing to serve it. The occurrence count is a
+// deliberate, bounded side channel: reporting that a field held four masked values tells
+// the platform something it would not otherwise know, and the alternative — reporting
+// nothing — makes masking indistinguishable from absence, which is the more serious failure.
+//
+// An absent report means nothing was masked. It never means redaction did not run: a result
+// that did not pass the enforcement point is never serialized at all.
+message RedactionReport {
+  repeated RedactedField fields = 1;
+}
+
+// One declared free-text field the policy swept, and what it found there.
+message RedactedField {
+  // The declared field, in the contract's own terms — the result message's field, dotted
+  // through any repeated message it sits in, as in
+  // "kubernetes_container_logs_v1.lines.content". Named rather than numbered so an
+  // operator reading a coverage gap recognises what was withheld.
+  string field_name = 1;
+  // How many occurrences were masked in it, across every element of a repeated field.
+  uint32 masked_occurrence_count = 2;
+  // Which rules matched, deduplicated and ordered, so a reader can ask the right person
+  // to adjust the policy rather than guessing which pattern was too broad.
+  repeated string rule_ids = 3;
 }
 
 // ---------------------------------------------------------------------------------
@@ -84,6 +126,11 @@ message Heartbeat {
   // Attestations refreshed between hellos; last-seen is stamped server-side.
   string local_policy_hash = 2;
   uint32 in_flight_count = 3;
+  // Freshness stamps for every inventory scope this Relay synchronizes. On the
+  // heartbeat rather than in a message of their own because a tick that found nothing
+  // changed sends no delta, and the ledger's currency must still be confirmed rather
+  // than assumed.
+  repeated InventoryScopeStatus inventory_scopes = 4;
 }
 
 // Assignment received and queued for execution. Proves reception ONLY — the job was
@@ -191,6 +238,7 @@ message RelayToControl {
     DrainState drain_state = 7;
     RotationConfirm rotation_confirm = 8;
     ProtocolError protocol_error = 9;
+    InventoryDelta inventory_delta = 10;
   }
 }
 
@@ -296,6 +344,8 @@ message ControlToRelay {
     DrainInstruction drain_instruction = 6;
     CapabilityRequirements capability_requirements = 7;
     GracefulReconnect graceful_reconnect = 8;
+    InventorySynchronizationPolicy inventory_synchronization_policy = 9;
+    InventoryDeltaAck inventory_delta_ack = 10;
   }
 }
 

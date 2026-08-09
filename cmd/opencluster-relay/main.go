@@ -10,7 +10,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -22,13 +24,19 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 
 	"github.com/open-cluster/oc-relay/internal/audit"
+	"github.com/open-cluster/oc-relay/internal/capabilities"
+	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/events"
+	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/logs"
 	"github.com/open-cluster/oc-relay/internal/capabilities/kubernetes/runtime"
 	"github.com/open-cluster/oc-relay/internal/config"
 	"github.com/open-cluster/oc-relay/internal/identity"
+	"github.com/open-cluster/oc-relay/internal/inventory"
 	"github.com/open-cluster/oc-relay/internal/kube"
+	"github.com/open-cluster/oc-relay/internal/redaction"
 	"github.com/open-cluster/oc-relay/internal/session"
 	"github.com/open-cluster/oc-relay/internal/transport"
 
@@ -48,17 +56,56 @@ const (
 	outboundBufferSize = 64
 )
 
+// options is what the command line says, as distinct from what the environment says. There is
+// one of them, and it selects a local diagnostic mode rather than tuning the running Relay:
+// process configuration stays in the environment, where it is one mechanism rather than two.
+type options struct {
+	// dryRunSample names a file of operator-supplied sample text to evaluate the redaction
+	// policy against, "-" for standard input. It runs locally and exits: no control plane, no
+	// cluster, no identity, no session.
+	dryRunSample string
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
-	if err := run(logger); err != nil {
+
+	var chosen options
+	flag.StringVar(&chosen.dryRunSample, "redaction-dry-run", "",
+		"evaluate the redaction policy against sample text in this file (\"-\" for stdin), "+
+			"report what would be masked, and exit")
+	flag.Parse()
+
+	if err := run(logger, chosen); err != nil {
 		logger.Error("relay exiting", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
+func run(logger *slog.Logger, chosen options) error {
 	cfg, err := config.Load(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+
+	// The redaction policy is loaded and reported before anything else happens, because a
+	// fault in it changes what this process may do at all — and because an operator has to be
+	// able to see what is actually in force rather than assume it.
+	guard := redaction.Load(cfg.RedactionPolicyFile)
+	guard.Describe(logger)
+
+	// Evaluating a policy against sample text is a local operation and deliberately needs no
+	// control plane, no cluster and no identity. A policy whose breadth is only discoverable
+	// by losing an investigation is a policy nobody will tune, so this path exits before any
+	// of that is built.
+	if chosen.dryRunSample != "" {
+		return dryRun(guard, chosen.dryRunSample, os.Stdout)
+	}
+
+	// Loaded before anything cluster-facing for the same reason the redaction policy
+	// is: a constraints file that does not parse must stop the process at startup,
+	// not surface as a scope that quietly never synchronizes.
+	inventoryLocal, err := inventory.LoadLocal(cfg.InventoryConfigFile)
 	if err != nil {
 		return err
 	}
@@ -81,23 +128,36 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	// The read-only cluster client serves the workload capability and reads the cluster
+	// The read-only cluster client serves every capability and reads the cluster
 	// fingerprint the session Hello carries (and enrollment attests).
-	reader, err := newWorkloadReader(cfg)
+	restConfig, err := restConfigFor(cfg)
 	if err != nil {
 		return err
 	}
+	restConfig.UserAgent = "opencluster-relay/" + version
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("building kubernetes client: %w", err)
+	}
+	reader := kube.NewReader(clientset)
 	fingerprint, err := clusterFingerprint(ctx, reader)
 	if err != nil {
 		return fmt.Errorf("reading cluster fingerprint: %w", err)
 	}
+
+	// Built before enrolment, because enrolment ATTESTS the same set the session advertises.
+	// Two lists would be two lists to drift, and the drift is silent in the worst way: the
+	// control plane would record at enrolment that this Relay serves one capability while the
+	// session says it serves three, and an operator reading the roster would believe the
+	// registration.
+	registry := compiledCapabilities(reader, cfg)
 
 	if needEnroll {
 		if cfg.BootstrapTokenFile == "" {
 			return fmt.Errorf(
 				"%w and RELAY_BOOTSTRAP_TOKEN_FILE is not set", identity.ErrBootstrapRequired)
 		}
-		credential, err = enroll(ctx, cfg, fingerprint, store, logger)
+		credential, err = enroll(ctx, cfg, fingerprint, registry.Descriptors(), store, logger)
 		if err != nil {
 			return err
 		}
@@ -119,11 +179,11 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	executor := audit.NewExecutor(runtime.NewExecutor(reader, cfg.LocalMaxPods), logger)
+	executor := guardedExecutor(registry, guard, logger)
 	relaySession := session.New(session.Config{
 		OrgID:              credential.OrgID,
 		RegistrationID:     credential.RegistrationID,
-		Capabilities:       []*relayv1.CapabilityDescriptor{runtime.Descriptor()},
+		Capabilities:       registry.Descriptors(),
 		MaxConcurrentJobs:  cfg.MaxConcurrentJobs,
 		RelayVersion:       version,
 		ClusterFingerprint: fingerprint,
@@ -132,6 +192,23 @@ func run(logger *slog.Logger) error {
 		OutboundBuffer:     outboundBufferSize,
 	}, executor)
 
+	// Change detection runs on its own clock, beside the session rather than inside
+	// it: a dropped stream must not stop observation, only delivery. The synchronizer
+	// idles until the control plane sends a policy over the session.
+	if inventoryLocal.Enabled {
+		metadataClient, metaErr := metadata.NewForConfig(restConfig)
+		if metaErr != nil {
+			return fmt.Errorf("building metadata client: %w", metaErr)
+		}
+		synchronizer := inventory.NewSynchronizer(
+			kube.NewInventoryLister(clientset, metadataClient),
+			inventoryLocal, cfg.AllowedNamespaces, nil)
+		relaySession.AttachInventory(synchronizer)
+		go func() { _ = synchronizer.Run(ctx) }()
+	} else {
+		logger.Info("inventory synchronization disabled by local configuration")
+	}
+
 	logger.Info("relay session starting",
 		slog.String("registration_id", credential.RegistrationID),
 		slog.String("relay_version", version))
@@ -139,22 +216,81 @@ func run(logger *slog.Logger) error {
 	return relaySession.Run(ctx, session.NewGRPCConnector(client, credential))
 }
 
-// newWorkloadReader builds the read-only Kubernetes boundary. In-cluster
-// ServiceAccount configuration is the production default; an explicit kubeconfig is
-// the operator-configured harness path through the hardened loader.
-func newWorkloadReader(cfg config.Config) (*kube.Reader, error) {
-	restConfig, err := restConfigFor(cfg)
-	if err != nil {
-		return nil, err
-	}
-	restConfig.UserAgent = "opencluster-relay/" + version
-	clientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return nil, fmt.Errorf("building kubernetes client: %w", err)
-	}
-	return kube.NewReader(clientset), nil
+// compiledCapabilities is the closed set this build can execute, and the same set it
+// advertises. One registry serves both, so what the Relay refuses is exactly what it never
+// claimed — there is no second list for the two to drift apart in.
+//
+// Every capability is handed the same customer-authored local policy. A namespace an
+// operator excluded is excluded from every read, not from whichever ones remembered to
+// check, which is the only form of that guarantee worth stating to them.
+func compiledCapabilities(reader *kube.Reader, cfg config.Config) *capabilities.Registry {
+	policy := capabilities.LocalPolicy{AllowedNamespaces: cfg.AllowedNamespaces}
+
+	registry := capabilities.NewRegistry()
+	registry.Register(runtime.Descriptor(), runtime.NewExecutor(reader, runtime.Options{
+		Policy:       policy,
+		LocalMaxPods: cfg.LocalMaxPods,
+	}))
+	registry.Register(events.Descriptor(), events.NewExecutor(reader, events.Options{
+		Policy:           policy,
+		LocalMaxEvents:   cfg.LocalMaxEvents,
+		RetentionHorizon: cfg.EventRetention,
+	}))
+	registry.Register(logs.Descriptor(), logs.NewExecutor(reader, logs.Options{
+		Policy:        policy,
+		LocalMaxLines: cfg.LocalMaxLogLines,
+		LocalMaxBytes: cfg.LocalMaxLogBytes,
+	}))
+	return registry
 }
 
+// guardedExecutor is the order the two decorators go in, and the order is the guarantee.
+//
+// Redaction sits INSIDE the audit decorator, so what audit measures and writes to the Relay's
+// own log is the result AFTER masking. The Relay must not log what it just removed: diagnosing
+// the Relay cannot be allowed to become the disclosure channel redaction exists to close, and
+// an audit line reporting the unredacted size would leak the length of what was masked.
+//
+// It is a named function rather than one expression inline so that the ordering can be tested
+// rather than only read. Getting these two the wrong way round is silent — everything still
+// works, and the log quietly measures the wrong thing.
+func guardedExecutor(
+	inner session.Executor, guard *redaction.Guard, logger *slog.Logger,
+) session.Executor {
+	return audit.NewExecutor(guard.Enforce(inner), logger)
+}
+
+// dryRun reports what the effective policy would mask in operator-supplied sample text.
+//
+// A faulted policy refuses here exactly as it refuses a capability, rather than previewing the
+// defaults. Showing an operator what the defaults would have done to text their own policy was
+// meant to govern is the one answer that would actively mislead them.
+func dryRun(guard *redaction.Guard, samplePath string, out io.Writer) error {
+	if fault := guard.Fault(); fault != nil {
+		return fault
+	}
+
+	var (
+		sample []byte
+		err    error
+	)
+	if samplePath == "-" {
+		sample, err = io.ReadAll(os.Stdin)
+	} else {
+		sample, err = os.ReadFile(samplePath)
+	}
+	if err != nil {
+		return fmt.Errorf("reading the sample text: %w", err)
+	}
+
+	preview := guard.Policy().DryRun(string(sample))
+	_, err = io.WriteString(out, preview.Render(guard.Policy()))
+	return err
+}
+
+// restConfigFor selects the read-only Kubernetes boundary's client configuration.
+// In-cluster ServiceAccount configuration is the production default; an explicit
+// kubeconfig is the operator-configured harness path through the hardened loader.
 func restConfigFor(cfg config.Config) (*rest.Config, error) {
 	if cfg.KubeconfigPath != "" {
 		restConfig, err := kube.LoadKubeconfig(cfg.KubeconfigPath)
@@ -182,7 +318,7 @@ func clusterFingerprint(ctx context.Context, reader *kube.Reader) (string, error
 // Relay never re-enrolls (see run).
 func enroll(
 	ctx context.Context, cfg config.Config, fingerprint string,
-	store identity.Store, logger *slog.Logger,
+	capabilities []*relayv1.CapabilityDescriptor, store identity.Store, logger *slog.Logger,
 ) (identity.Credential, error) {
 	token, err := readBootstrapToken(cfg.BootstrapTokenFile)
 	if err != nil {
@@ -209,7 +345,7 @@ func enroll(
 			ProtocolVersion:    protocolVersion,
 			RelayVersion:       version,
 			ClusterFingerprint: fingerprint,
-			Capabilities:       []*relayv1.CapabilityDescriptor{runtime.Descriptor()},
+			Capabilities:       capabilities,
 		}, store)
 	if err != nil {
 		return identity.Credential{}, err

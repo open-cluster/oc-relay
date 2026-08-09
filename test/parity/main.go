@@ -58,7 +58,7 @@ func run(kubeconfigPath, namespace, kindName, name string, maxPods, deadlineMs i
 		return fmt.Errorf("building clientset: %w", err)
 	}
 
-	executor := runtime.NewExecutor(kube.NewReader(clientset), maxPods)
+	executor := runtime.NewExecutor(kube.NewReader(clientset), runtime.Options{LocalMaxPods: maxPods})
 	job := &relayv1.JobAssignment{
 		JobId:             "parity",
 		LeaseEpoch:        1,

@@ -107,5 +107,62 @@ credentials exist.
 | Capability | Version | Schema |
 | --- | --- | --- |
 | `kubernetes.workload.runtime` | 1 | `kubernetes_workload_runtime.proto` — workload runtime read: closed workload-kind vocabulary, complete selector semantics with refuse-on-unrepresentable, per-kind replica counters, pod/container states with OOM detection, single bounded page with continuation-free completeness basis |
+| `kubernetes.namespace.events` | 1 | `kubernetes_namespace_events.proto` — what the cluster said it did in one namespace: optional narrowing to one involved object by identifier, a required half-open window, one bounded page with a continuation-free completeness basis, and a stated retention horizon so an empty window is never mistaken for an absence |
+| `kubernetes.container.logs` | 1 | `kubernetes_container_logs.proto` — one container's output, bounded in lines AND in bytes with both effective values reported, an explicit selector for the previous terminated container, and no follow, stream or tail-forever mode anywhere in the schema |
 
 Each capability's documentation states exactly what data leaves the cluster.
+
+Every capability carries its OWN outcome enum rather than sharing one. A closed taxonomy
+whose values are not all reachable is not closed: an events read cannot produce a
+container-not-found and a log read cannot produce an unrepresentable selector, so neither
+enum carries the other's values.
+
+### Cluster permissions
+
+Adding a capability must not silently widen what the Relay can reach. Each states the verbs
+it needs, all of them namespace-scopeable:
+
+| Capability | Resources | Verbs |
+| --- | --- | --- |
+| `kubernetes.workload.runtime` | `apps/deployments`, `apps/statefulsets`, `apps/daemonsets`, `pods` | `get`, `list` |
+| `kubernetes.namespace.events` | `events` | `list` |
+| `kubernetes.container.logs` | `pods`, `pods/log` | `get` |
+
+`pods/log` is granted separately from `pods`, so a Relay may be able to read a pod and be
+refused its output. That refusal arrives as `UNAUTHORIZED` and never as a container with
+nothing to say — conflating the two is how an RBAC mistake becomes a certified negative.
+
+`kubernetes.namespace.events` deliberately does NOT require a cluster-scoped namespace read,
+which is why it has no namespace-not-found outcome: the API answers a list in a namespace
+that does not exist with an empty list and a 200, and telling the two apart would cost
+namespace-scoped RBAC. An empty complete read therefore states exactly what it says.
+
+### Local policy
+
+Customer-authored configuration may narrow a read and may never widen one. The volume caps
+are applied last, after the schema's own floor and ceiling, so no dispatched value can raise
+one; the namespace allowlist refuses a read outright with `KIND_LOCAL_POLICY_REFUSED`; and
+the retention horizon is an attestation only the operator can make, because nobody else
+knows their apiserver's `--event-ttl`.
+
+| Variable | Effect | Default |
+| --- | --- | --- |
+| `RELAY_LOCAL_MAX_PODS` | Caps pods per workload read | 50 (the schema maximum) |
+| `RELAY_LOCAL_MAX_EVENTS` | Caps events per read | 200 (the schema maximum) |
+| `RELAY_LOCAL_MAX_LOG_LINES` | Caps lines per log read | 2000 (the schema maximum) |
+| `RELAY_LOCAL_MAX_LOG_BYTES` | Caps bytes per log read | 262144 (the schema maximum) |
+| `RELAY_ALLOWED_NAMESPACES` | The complete set of readable namespaces | unset — narrows nothing, RBAC is the boundary |
+| `RELAY_EVENT_RETENTION` | Attested event-retention horizon | 1h (the Kubernetes default event TTL) |
+| `RELAY_INVENTORY_CONFIG_FILE` | Operator constraints on inventory synchronization, nested under an `inventory:` root: an enable switch, a namespace allowlist for watching, and a floor under any control-plane-requested interval | unset — enabled, constrained only by `RELAY_ALLOWED_NAMESPACES`, floored at 30s |
+
+A value above a schema maximum is refused at startup rather than clamped: an operator who
+typed a number the product cannot serve should be told, not quietly given a smaller one. A
+value below a capability's own floor is accepted, because narrowing is always allowed.
+
+### Redaction gate
+
+`kubernetes.container.logs` may be used against synthetic scenario clusters immediately and
+against **no cluster containing real data until Relay-side redaction exists**. Applications
+print secrets into logs constantly and nobody notices until something reads them, so the
+order — capability first on synthetic clusters, redaction before any real one — belongs in
+the release checklist rather than in someone's memory.

@@ -5,6 +5,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/open-cluster/oc-relay/internal/capabilities"
+
 	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
@@ -31,12 +33,12 @@ func MapPod(pod *corev1.Pod) *relayv1.KubernetesPodRuntime {
 		startedAt = mapTime(*pod.Status.StartTime)
 	}
 	return &relayv1.KubernetesPodRuntime{
-		Name:              capIdentifier(pod.Name),
-		Phase:             capReason(phase),
-		NodeName:          capIdentifier(pod.Spec.NodeName),
+		Name:              capabilities.CapIdentifier(pod.Name),
+		Phase:             capabilities.CapReason(phase),
+		NodeName:          capabilities.CapIdentifier(pod.Spec.NodeName),
 		StartedAt:         startedAt,
 		Ready:             podReady(pod.Status.Conditions),
-		UnscheduledReason: capReason(unscheduledReason(pod.Status.Conditions)),
+		UnscheduledReason: capabilities.CapReason(unscheduledReason(pod.Status.Conditions)),
 		Containers:        containers,
 	}
 }
@@ -54,8 +56,8 @@ func unscheduledReason(conditions []corev1.PodCondition) string {
 
 func mapContainer(status corev1.ContainerStatus) *relayv1.KubernetesContainerRuntime {
 	return &relayv1.KubernetesContainerRuntime{
-		Name:            capIdentifier(status.Name),
-		Image:           capImage(status.Image),
+		Name:            capabilities.CapIdentifier(status.Name),
+		Image:           capabilities.CapImage(status.Image),
 		Ready:           status.Ready,
 		RestartCount:    status.RestartCount,
 		State:           mapState(status.State),
@@ -80,7 +82,7 @@ func mapState(state corev1.ContainerState) *relayv1.KubernetesContainerState {
 	}
 	waitingReason := ""
 	if state.Waiting != nil {
-		waitingReason = capReason(state.Waiting.Reason)
+		waitingReason = capabilities.CapReason(state.Waiting.Reason)
 	}
 	return &relayv1.KubernetesContainerState{
 		Kind:          relayv1.KubernetesContainerState_KIND_WAITING,
@@ -99,7 +101,7 @@ func mapTermination(terminated *corev1.ContainerStateTerminated) *relayv1.Kubern
 		reason = "Unknown"
 	}
 	return &relayv1.KubernetesContainerTermination{
-		Reason:     capReason(reason),
+		Reason:     capabilities.CapReason(reason),
 		ExitCode:   terminated.ExitCode,
 		FinishedAt: mapTime(terminated.FinishedAt),
 	}

@@ -5,6 +5,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/open-cluster/oc-relay/internal/capabilities"
+
 	relayv1 "github.com/open-cluster/oc-relay/gen/go/opencluster/relay/v1"
 )
 
@@ -67,9 +69,9 @@ func summary(
 	images := make([]string, 0, len(declared))
 	resources := make([]*relayv1.KubernetesContainerResources, 0, len(declared))
 	for _, container := range declared {
-		images = append(images, capImage(container.Image))
+		images = append(images, capabilities.CapImage(container.Image))
 		resources = append(resources, &relayv1.KubernetesContainerResources{
-			Container:     capIdentifier(container.Name),
+			Container:     capabilities.CapIdentifier(container.Name),
 			CpuRequest:    quantityOf(container.Resources.Requests, corev1.ResourceCPU),
 			CpuLimit:      quantityOf(container.Resources.Limits, corev1.ResourceCPU),
 			MemoryRequest: quantityOf(container.Resources.Requests, corev1.ResourceMemory),
@@ -81,14 +83,14 @@ func summary(
 	// and the read itself refuses enumeration (SELECTOR_UNREPRESENTABLE).
 	selectorSummary := ""
 	if rendered, ok := RenderSelector(selector); ok {
-		selectorSummary = capImage(rendered)
+		selectorSummary = capabilities.CapImage(rendered)
 	}
 
 	return &relayv1.KubernetesWorkloadSummary{
 		Kind:               kind,
-		Name:               capIdentifier(meta.Name),
-		Namespace:          capIdentifier(meta.Namespace),
-		Uid:                capIdentifier(string(meta.UID)),
+		Name:               capabilities.CapIdentifier(meta.Name),
+		Namespace:          capabilities.CapIdentifier(meta.Namespace),
+		Uid:                capabilities.CapIdentifier(string(meta.UID)),
 		DesiredReplicas:    c.desired,
 		ReadyReplicas:      c.ready,
 		UpdatedReplicas:    c.updated,
@@ -108,7 +110,7 @@ func quantityOf(list corev1.ResourceList, name corev1.ResourceName) string {
 	if !ok {
 		return ""
 	}
-	return capQuantity(quantity.String())
+	return capabilities.CapQuantity(quantity.String())
 }
 
 func int32OrZero(v *int32) int32 {

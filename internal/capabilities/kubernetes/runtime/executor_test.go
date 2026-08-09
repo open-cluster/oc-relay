@@ -114,7 +114,7 @@ func TestExecutor_SuccessMapsWorkloadAndPodsWithCompletenessBasis(t *testing.T) 
 			Truncated: false,
 		},
 	}
-	exec := NewExecutor(reader, 50)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 
 	result := kubeResult(t, exec.Execute(context.Background(),
 		deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_DEPLOYMENT, "default", "api", 10)))
@@ -145,7 +145,7 @@ func TestExecutor_TruncatedPageIsNotComplete(t *testing.T) {
 		},
 		page: &kube.PodPage{Pods: []corev1.Pod{{}}, Truncated: true},
 	}
-	exec := NewExecutor(reader, 50)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 
 	result := kubeResult(t, exec.Execute(context.Background(),
 		deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_DEPLOYMENT, "default", "api", 10)))
@@ -165,7 +165,7 @@ func TestExecutor_EffectiveMaxPodsClampsToLocalCapAndBounds(t *testing.T) {
 	}
 	// Local cap 8 is below the dispatched 40: the effective bound (and applied_max_pods)
 	// must be the local cap, and the list must be called with it.
-	exec := NewExecutor(reader, 8)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 8})
 
 	result := kubeResult(t, exec.Execute(context.Background(),
 		deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_DEPLOYMENT, "default", "api", 40)))
@@ -180,7 +180,7 @@ func TestExecutor_EffectiveMaxPodsClampsToLocalCapAndBounds(t *testing.T) {
 
 func TestExecutor_UnknownKindIsRejectedNeverFallsThroughToDaemonSet(t *testing.T) {
 	reader := &fakeReader{daemonSet: &appsv1.DaemonSet{}}
-	exec := NewExecutor(reader, 50)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 
 	result := exec.Execute(context.Background(),
 		deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_UNSPECIFIED, "default", "api", 10))
@@ -191,7 +191,7 @@ func TestExecutor_UnknownKindIsRejectedNeverFallsThroughToDaemonSet(t *testing.T
 }
 
 func TestExecutor_InvalidNamespaceOrNameRejected(t *testing.T) {
-	exec := NewExecutor(&fakeReader{}, 50)
+	exec := NewExecutor(&fakeReader{}, Options{LocalMaxPods: 50})
 	for _, tc := range []struct{ ns, name string }{
 		{"Default", "api"}, // uppercase namespace
 		{"default", "Api"}, // uppercase name
@@ -219,7 +219,7 @@ func TestExecutor_UnrepresentableSelectorRefusesEnumeration(t *testing.T) {
 		},
 		page: &kube.PodPage{Pods: []corev1.Pod{{}, {}}},
 	}
-	exec := NewExecutor(reader, 50)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 
 	result := kubeResult(t, exec.Execute(context.Background(),
 		deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_DEPLOYMENT, "default", "api", 10)))
@@ -242,7 +242,7 @@ func TestExecutor_ReadOutcomeTaxonomyFromPortErrors(t *testing.T) {
 		kube.OutcomeUnreachable:      relayv1.KubernetesReadOutcome_KUBERNETES_READ_OUTCOME_UNREACHABLE,
 	} {
 		reader := &fakeReader{getErr: &kube.ReadError{Outcome: outcome}}
-		exec := NewExecutor(reader, 50)
+		exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 		result := kubeResult(t, exec.Execute(context.Background(),
 			deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_DEPLOYMENT, "default", "api", 10)))
 		if result.GetOutcome() != want {
@@ -253,7 +253,7 @@ func TestExecutor_ReadOutcomeTaxonomyFromPortErrors(t *testing.T) {
 
 func TestExecutor_DeadlineBudgetExpiryIsTimeout(t *testing.T) {
 	reader := &fakeReader{block: make(chan struct{})} // GET blocks forever
-	exec := NewExecutor(reader, 50)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 	job := deploymentJob(relayv1.WorkloadKind_WORKLOAD_KIND_DEPLOYMENT, "default", "api", 10)
 	job.DeadlineBudget = durationpb.New(50 * time.Millisecond)
 
@@ -266,7 +266,7 @@ func TestExecutor_DeadlineBudgetExpiryIsTimeout(t *testing.T) {
 
 func TestExecutor_CallerCancellationIsCancellation(t *testing.T) {
 	reader := &fakeReader{block: make(chan struct{})}
-	exec := NewExecutor(reader, 50)
+	exec := NewExecutor(reader, Options{LocalMaxPods: 50})
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan *relayv1.JobResult, 1)
