@@ -1,7 +1,7 @@
 # OpenCluster Relay
 
 Status: private pre-release. Not published, no releases, no public artifacts. The
-module and image identity are provisional pending name clearance (docs/naming.md).
+module and image identity are provisional pending name clearance.
 
 ## Overview
 

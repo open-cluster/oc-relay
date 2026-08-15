@@ -2,9 +2,11 @@
 
 This file is the canonical instruction authority for AI agents and automation working
 in this repository. It is tool-agnostic. `CLAUDE.md` is a thin adapter on top of this
-file; the `.claude/` directory holds the workflow commands and reviewer definitions
-that implement it. This repository's harness is self-contained: nothing here imports
-from, references, or depends on any private repository.
+file. Agent harness configuration — `.claude/`, `.agents/`, skill installs,
+`skills-lock.json` — is per-engineer, local-only, and gitignored, per organization
+engineering standards; this repository must be fully understandable, buildable, and
+contributable without it. Nothing here imports from, references, or depends on any
+private repository.
 
 ---
 
@@ -147,17 +149,18 @@ must be added to this table in the same change.
 
 ## Workflow
 
-The execution loop, implemented by the `.claude/commands/` files:
+The execution loop:
 
-`/context` → `/plan` → `/plan-review` → `/tdd` (RED → GREEN → REFACTOR) →
-`/verify` → `/security-review` (when the change touches a security surface) →
-`/exit-review`
+context → plan → plan review → TDD (RED → GREEN → REFACTOR) → verify →
+security review (when the change touches a security surface) → exit review
 
 - No approved plan → no implementation. One failing test at a time; if a test
   passes in RED, fix the test first.
 - The plan is the source of truth. If implementation must deviate, stop, update the
   plan, and re-run `/plan-review`.
-- Slice plans for work in this repository live in `plans/` here and must satisfy
+- Plans are local working state and are never committed (`plans/` is gitignored).
+  Durable decisions from finished work are recorded in `docs/` or the Protobuf
+  contract before merge. Everything written — including local plans — must satisfy
   the repository boundary above (public-safe). Work that touches private
   control-plane internals is planned in the control-plane repository, not here.
 - Every completion claim carries evidence: the command run and its actual output.

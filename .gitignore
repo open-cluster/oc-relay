@@ -18,6 +18,15 @@ coverage.*
 .DS_Store
 Thumbs.db
 
+# Crash artefacts
+*.stackdump
+
 # Local environment (never committed; credentials never live in this repo)
 .env
 *.local.yaml
+
+# AI-assisted development working state (local-only, per organization engineering standards)
+/.agents/
+/.claude/
+/skills-lock.json
+/plans/
